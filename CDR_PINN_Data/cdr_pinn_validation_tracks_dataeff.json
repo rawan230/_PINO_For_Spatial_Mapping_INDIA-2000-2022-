@@ -1,0 +1,22 @@
+{
+  "dataeff": [
+    {
+      "tag": "dataeff_full_physics",
+      "n_eval": 4508,
+      "positive_frac": 0.42058563232421875,
+      "roc_auc": 0.9406198307390105,
+      "ap": 0.9218583878303759,
+      "train_time_sec": 367.3715615272522,
+      "epochs": 80
+    },
+    {
+      "tag": "dataeff_no_physics",
+      "n_eval": 4508,
+      "positive_frac": 0.42058563232421875,
+      "roc_auc": 0.9460760260983063,
+      "ap": 0.9295335202094382,
+      "train_time_sec": 146.68619227409363,
+      "epochs": 80
+    }
+  ]
+}

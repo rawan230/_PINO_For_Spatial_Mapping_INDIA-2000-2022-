@@ -1,0 +1,126 @@
+{
+  "total_wall_time_sec": 3871.6029460430145,
+  "track_a_random_split": [
+    {
+      "model": "LogisticRegression",
+      "roc_auc": 0.9460483219190452,
+      "average_precision": 0.5068728529839491,
+      "f1_at_0.5": 0.45335869909860943,
+      "train_seconds": 9.605241060256958
+    },
+    {
+      "model": "RandomForest",
+      "roc_auc": 0.9675937392621943,
+      "average_precision": 0.6764583799012879,
+      "f1_at_0.5": 0.5493578919303235,
+      "train_seconds": 186.2612099647522
+    },
+    {
+      "model": "XGBoost",
+      "roc_auc": 0.9677786373298944,
+      "average_precision": 0.673988912602914,
+      "f1_at_0.5": 0.5179054704683905,
+      "train_seconds": 42.52687072753906
+    },
+    {
+      "model": "PlainMLP",
+      "roc_auc": 0.9614495274045876,
+      "average_precision": 0.6278763969645136,
+      "f1_at_0.5": 0.48078067803124397,
+      "train_seconds": 264.8430509567261
+    },
+    {
+      "model": "PINN",
+      "roc_auc": 0.9613495806613015,
+      "average_precision": 0.6278103641162117,
+      "f1_at_0.5": 0.48283665473883713,
+      "train_seconds": 403.9673800468445
+    }
+  ],
+  "track_b1_spatial_block_cv_summary": [
+    {
+      "model": "LogisticRegression",
+      "mean_auc": 0.9396354391104613,
+      "std_auc": 0.0077556595345764185,
+      "n_folds": 3
+    },
+    {
+      "model": "PINN",
+      "mean_auc": 0.949358212035055,
+      "std_auc": 0.006451734138058752,
+      "n_folds": 3
+    },
+    {
+      "model": "PlainMLP",
+      "mean_auc": 0.9498981435935163,
+      "std_auc": 0.006071185651667089,
+      "n_folds": 3
+    },
+    {
+      "model": "RandomForest",
+      "mean_auc": 0.9459478084148719,
+      "std_auc": 0.0044476831207670995,
+      "n_folds": 3
+    },
+    {
+      "model": "XGBoost",
+      "mean_auc": 0.9491804962740072,
+      "std_auc": 0.0044023501279907154,
+      "n_folds": 3
+    }
+  ],
+  "track_b2_leave_one_region_out_summary": [
+    {
+      "model": "PINN",
+      "mean": 0.8869807478008949,
+      "std": 0.08314699373623582,
+      "count": 6
+    },
+    {
+      "model": "PlainMLP",
+      "mean": 0.8896150968553549,
+      "std": 0.07817709144879971,
+      "count": 6
+    },
+    {
+      "model": "RandomForest",
+      "mean": 0.8720557150249949,
+      "std": 0.10726217059982354,
+      "count": 6
+    }
+  ],
+  "pinn_lambda_ablation": [
+    {
+      "lambda_phys": 0.0,
+      "spatial_holdout_auc": 0.9503612679054222,
+      "internal_val_auc": 0.9594728301259048,
+      "train_seconds": 105.33678674697876
+    },
+    {
+      "lambda_phys": 0.01,
+      "spatial_holdout_auc": 0.9512245698849252,
+      "internal_val_auc": 0.9594655750367479,
+      "train_seconds": 100.23011183738708
+    },
+    {
+      "lambda_phys": 0.1,
+      "spatial_holdout_auc": 0.9517656144051135,
+      "internal_val_auc": 0.9594824817607419,
+      "train_seconds": 96.69049191474915
+    },
+    {
+      "lambda_phys": 1.0,
+      "spatial_holdout_auc": 0.9506021870418532,
+      "internal_val_auc": 0.959402862607807,
+      "train_seconds": 98.08887767791748
+    }
+  ],
+  "pinn_lambda_chosen": 0.1,
+  "compute_budget_note": "Track B1 uses 3 spatial folds (not 5) and Track B2 clusters 37 unnamed state polygons into 6 KMeans regions (not per-state) to keep the full 5-model x 3-track run tractable; Track A (headline numbers) uses full model budget.",
+  "environment": {
+    "torch_version": "2.12.1+cpu",
+    "torch_cuda_available": false,
+    "xgboost_version": "3.2.0",
+    "kernel": "firerisk-anaconda3"
+  }
+}

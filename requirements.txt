@@ -1,0 +1,27 @@
+# Step 7 -- Physics-Informed Fire-Risk Model -- dependencies
+# Install with: pip install -r requirements.txt
+#
+# Pinned versions matter here: numpy 2.x requires pandas >= 3.0, matplotlib >= 3.10,
+# scipy >= 1.16, and scikit-learn >= 1.9 -- older wheels are built against the numpy 1.x
+# ABI and crash with "numpy.core._multiarray_umath failed to import" if numpy 2.x is
+# already present (same issue class hit in Step 3, and again in Step 5).
+
+numpy==2.5.1
+pandas>=3.0
+matplotlib>=3.10
+scipy>=1.16
+scikit-learn>=1.9
+xgboost==3.2.0
+# CPU wheel deliberately -- CUDA isn't wired into the firerisk-anaconda3 conda env this
+# project uses (torch.cuda.is_available() is False there even though the machine has a
+# real GPU); tabular MLP/PINN training at this data scale is fast enough on CPU that
+# this doesn't matter in practice. Install with:
+#   pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
+torch==2.12.1
+geopandas
+pyogrio
+pyarrow
+psutil
+tqdm
+jupyter
+nbconvert

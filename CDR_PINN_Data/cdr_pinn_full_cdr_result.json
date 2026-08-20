@@ -1,0 +1,20 @@
+{
+  "config": "full_cdr",
+  "term_flags": {
+    "use_diffusion": true,
+    "use_advection": true,
+    "use_reaction": true
+  },
+  "n_params": 1054613,
+  "n_epochs": 80,
+  "train_time_sec": 343.10482907295227,
+  "peak_gpu_mem_mb": 3240.6144,
+  "final_total_loss": 2.049797276655833,
+  "final_data_loss": 0.7234214891990026,
+  "final_pde_loss": 0.1656533951560656,
+  "final_bc_loss": 7.711233805215063e-05,
+  "held_out_n": 4508,
+  "held_out_positive_frac": 0.42058563232421875,
+  "held_out_roc_auc": 0.94059731618431,
+  "held_out_ap": 0.9253136330412538
+}

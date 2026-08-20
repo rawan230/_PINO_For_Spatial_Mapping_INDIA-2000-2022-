@@ -1,0 +1,354 @@
+"""
+Tracks B1 (spatial block CV), B2 (leave-one-region-out), B3 (leave-years-out,
+new), and a physics-vs-no-physics data-efficiency comparison, all against the
+identical full_cdr configuration and data as Track A (train.py).
+
+Shares model.py/losses.py; reimplements the training loop here (rather than
+importing train.run()) because each track needs a different train/test
+*masking* strategy (spatial pixel masks for B1/B2, temporal month masks for
+B3, and a physics-on/off toggle for the data-efficiency test) that doesn't
+cleanly fit train.py's single random-pixel-split assumption.
+"""
+import argparse
+import json
+import time
+import numpy as np
+import torch
+import torch.optim as optim
+from sklearn.cluster import KMeans
+from sklearn.metrics import roc_auc_score, average_precision_score
+
+from model import CDRPINN
+from losses import data_loss_monthly, data_loss_terminal, pde_loss, bc_loss, ic_loss, AdaptiveLossBalancer
+from build_monthly_stacks import LON_MIN, LON_MAX, LAT_MIN, LAT_MAX, TARGET_H, TARGET_W
+
+DATA_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz"
+CKPT_DIR = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data"
+
+WINDOW = 24
+WIDTH = 32
+N_LAYERS = 4
+MODES = 16
+LR = 1e-3
+SEED = 42
+FULL_CDR = dict(use_diffusion=True, use_advection=True, use_reaction=True)
+
+
+def load_data(device):
+    d = np.load(DATA_PATH)
+    H, W = TARGET_H, TARGET_W
+    n_months = len(d["months"])
+
+    def t(x):
+        return torch.tensor(np.nan_to_num(x, nan=0.0), dtype=torch.float32, device=device)
+
+    ndvi_f1 = d["ndvi_f1"]
+    valid_np = ~np.isnan(ndvi_f1)
+    up = np.roll(valid_np, 1, axis=0); down = np.roll(valid_np, -1, axis=0)
+    left = np.roll(valid_np, 1, axis=1); right = np.roll(valid_np, -1, axis=1)
+    boundary_np = valid_np & (~up | ~down | ~left | ~right)
+
+    tensors = dict(
+        ndvi_f1=t(ndvi_f1), ndvi_anomaly=t(d["ndvi_anomaly"]), forest_frac=t(d["forest_frac"]),
+        dryness=t(d["dryness_proxy"]), slope=t(d["slope"]), dist_roads=t(d["dist_roads"]),
+        elevation=t(d["elevation"]), grad_e_x=t(d["grad_e_x"]), grad_e_y=t(d["grad_e_y"]),
+        fire_indicator=t(d["fire_indicator"]), fire_ever_frac=t(d["fire_ever_frac"]),
+    )
+    fire_ever_binary_np = (d["fire_ever_frac"] > 0).astype(np.float32)
+    months = d["months"]
+    years_np = np.array([int(m[:4]) for m in months])
+
+    lat_deg = np.linspace(LAT_MAX, LAT_MIN, H)
+    lon_deg = np.linspace(LON_MIN, LON_MAX, W)
+    lat_rad = torch.tensor(np.radians(lat_deg), dtype=torch.float32, device=device)
+    dlat_rad = float(np.radians(abs(lat_deg[1] - lat_deg[0])))
+    dlon_rad = float(np.radians((LON_MAX - LON_MIN) / W))
+    lon_grid, lat_grid = np.meshgrid(lon_deg, lat_deg)  # (H,W) each
+
+    return dict(
+        H=H, W=W, n_months=n_months, valid_np=valid_np, boundary_np=boundary_np,
+        tensors=tensors, fire_ever_binary_np=fire_ever_binary_np, years_np=years_np,
+        lat_rad=lat_rad, dlat_rad=dlat_rad, dlon_rad=dlon_rad, lon_grid=lon_grid, lat_grid=lat_grid,
+    )
+
+
+def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
+                    epochs=80, term_flags=FULL_CDR, use_physics=True,
+                    train_month_mask=None, eval_month_mask=None):
+    """train_pixel_mask/test_pixel_mask: (H,W) bool -- which pixels' data-loss
+    supervision is used for training vs. held out for evaluation (spatial split).
+    train_month_mask/eval_month_mask: (n_months-1,) bool, optional -- which
+    MONTHS' data-loss supervision is used for training vs. evaluation (temporal
+    split, Track B3). If None, all months are used for both (spatial-only split).
+    use_physics=False zeroes out the PDE+BC loss entirely (data-efficiency test)."""
+    torch.manual_seed(SEED)
+    H, W, n_months = ctx["H"], ctx["W"], ctx["n_months"]
+    t_ = ctx["tensors"]
+    valid_mask = torch.tensor(ctx["valid_np"], dtype=torch.bool, device=device)
+    boundary_mask = torch.tensor(ctx["boundary_np"], dtype=torch.bool, device=device)
+    train_data_mask = torch.tensor(ctx["valid_np"] & train_pixel_mask, dtype=torch.bool, device=device)
+    lat_rad, dlon_rad, dlat_rad = ctx["lat_rad"], ctx["dlon_rad"], ctx["dlat_rad"]
+
+    if train_month_mask is None:
+        train_month_mask = np.ones(n_months - 1, dtype=bool)
+    if eval_month_mask is None:
+        eval_month_mask = np.ones(n_months - 1, dtype=bool)
+
+    monthly_pos_rate = t_["fire_indicator"][:-1][train_month_mask][:, train_data_mask].mean().item()
+    pos_weight = (1.0 - monthly_pos_rate) / max(monthly_pos_rate, 1e-6)
+
+    def covariate_stack(ti):
+        return torch.stack([
+            t_["ndvi_f1"], t_["ndvi_anomaly"][ti], t_["forest_frac"], t_["dryness"][ti],
+            t_["slope"], t_["dist_roads"], t_["elevation"],
+        ], dim=0).unsqueeze(0)
+
+    def physics_covariates(ti):
+        return {
+            "ndvi_f1": t_["ndvi_f1"].unsqueeze(0), "forest_frac": t_["forest_frac"].unsqueeze(0),
+            "ndvi_anomaly": t_["ndvi_anomaly"][ti].unsqueeze(0),
+            "grad_e_x": t_["grad_e_x"].unsqueeze(0), "grad_e_y": t_["grad_e_y"].unsqueeze(0),
+            "dryness": t_["dryness"][ti].unsqueeze(0), "slope": t_["slope"].unsqueeze(0),
+            "dist_roads": t_["dist_roads"].unsqueeze(0),
+        }
+
+    model = CDRPINN(n_static_channels=7, width=WIDTH, modes_h=MODES, modes_w=MODES, n_layers=N_LAYERS).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=LR)
+    # Cosine LR decay -- added specifically to test the hypothesis that the width=64
+    # scale-up regression (AUC 0.9406->0.9292) was an LR-schedule/overfitting
+    # interaction rather than a physics-formulation problem: the fixed lr=1e-3 used
+    # for every prior run was never tuned for the larger model's different
+    # optimization landscape. eta_min=lr/100 rather than 0, so late epochs keep a
+    # small but nonzero step rather than fully freezing.
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=LR / 100)
+    loss_names = ["data", "ic"] if not use_physics else ["data", "pde", "bc", "ic"]
+    balancer = AdaptiveLossBalancer(loss_names, update_every=5)
+
+    t_start = time.time()
+    for epoch in range(epochs):
+        u = torch.zeros(1, 1, H, W, device=device)
+        for start in range(0, n_months - 1, WINDOW):
+            end = min(start + WINDOW, n_months - 1)
+            window_data = 0.0
+            window_pde, window_bc = 0.0, 0.0
+            window_ic = ic_loss(u) if start == 0 else torch.zeros((), device=device)
+            traj = [u.detach()]
+            n_data_terms = 0
+
+            for ti in range(start, end):
+                cov_stack = covariate_stack(ti)
+                u_next = model(u, cov_stack)
+
+                if use_physics:
+                    residual, _ = model.pde_residual(
+                        u, u_next, dt_months=1.0, covariates=physics_covariates(ti),
+                        lat_rad_1d=lat_rad, dlon_rad=dlon_rad, dlat_rad=dlat_rad, **term_flags)
+                    window_pde = window_pde + pde_loss(residual.squeeze(0), valid_mask)
+                    mid = 0.5 * (u.squeeze(0).squeeze(0) + u_next.squeeze(0).squeeze(0))
+                    window_bc = window_bc + bc_loss(mid, lat_rad, dlon_rad, dlat_rad, boundary_mask)
+
+                if train_month_mask[ti]:
+                    window_data = window_data + data_loss_monthly(
+                        u_next.squeeze(0).squeeze(0), t_["fire_indicator"][ti + 1], train_data_mask,
+                        pos_weight=pos_weight)
+                    n_data_terms += 1
+                traj.append(u_next)
+                u = u_next
+
+            n_steps = end - start
+            if use_physics:
+                window_pde, window_bc = window_pde / n_steps, window_bc / n_steps
+            window_data = window_data / max(n_data_terms, 1) if n_data_terms > 0 else torch.zeros((), device=device)
+
+            is_last_window = (end >= n_months - 1)
+            if is_last_window:
+                traj_stack = torch.cat(traj, dim=0).squeeze(1)
+                # traj_stack has length (end-start+1): traj[0]=u at window start (always
+                # "in", it's just the carried-over state, not a supervised month), then
+                # traj[1:] correspond to ti=start..end-1 in this WINDOW's own local
+                # indexing -- must NOT be indexed with a mask built at full-sequence (266)
+                # length (that was the bug: an out-of-bounds CUDA gather).
+                window_train_flags = [True] + [bool(train_month_mask[ti]) for ti in range(start, end)]
+                idx = np.where(np.array(window_train_flags))[0]
+                if len(idx) > 1:
+                    window_terminal = data_loss_terminal(traj_stack[idx], t_["fire_ever_frac"], train_data_mask, tau=5.0)
+                    window_data = 0.5 * window_data + 0.5 * window_terminal
+
+            if use_physics:
+                losses = {"data": window_data, "pde": window_pde, "bc": window_bc, "ic": window_ic}
+            else:
+                losses = {"data": window_data, "ic": window_ic}
+            total, weights = balancer.combine(losses, list(model.parameters()))
+
+            optimizer.zero_grad()
+            total.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            optimizer.step()
+            u = u.detach()
+
+        scheduler.step()
+
+    train_time = time.time() - t_start
+
+    # ---- Evaluation: full rollout, no grad, LSE-pooled score over EVAL months only.
+    #      NOTE: an earlier version of this evaluation used a hard max-pool here,
+    #      which does NOT match what training actually optimizes (data_loss_terminal
+    #      uses LSE-pooling, tau=5 -- losses.py's lse_pool). That mismatch between the
+    #      training objective and the evaluation metric is a real bug, not a stylistic
+    #      choice -- fixed here to use the identical LSE-pool the model was trained
+    #      against, for a fair, consistent readout of what the model actually learned. ----
+    from losses import lse_pool as _lse_pool
+    model.eval()
+    with torch.no_grad():
+        u = torch.zeros(1, 1, H, W, device=device)
+        scores = []
+        for ti in range(n_months - 1):
+            u_next = model(u, covariate_stack(ti))
+            if eval_month_mask[ti]:
+                scores.append(torch.sigmoid(u_next.squeeze(0).squeeze(0)))
+            u = u_next
+        score_stack = torch.stack(scores, dim=0)  # (T_eval, H, W)
+        pooled = _lse_pool(score_stack, dim=0, tau=5.0)
+        pred_score = pooled.cpu().numpy()
+
+    eval_pixel_mask = ctx["valid_np"] & test_pixel_mask
+    if train_month_mask is not None and not np.array_equal(train_month_mask, eval_month_mask):
+        # Track B3: evaluate on TEST-YEAR months specifically, per-month AUC over ALL valid pixels
+        # (not spatially held out -- the split here is temporal, not spatial)
+        y_true_list, y_score_list = [], []
+        with torch.no_grad():
+            u = torch.zeros(1, 1, H, W, device=device)
+            for ti in range(n_months - 1):
+                u_next = model(u, covariate_stack(ti))
+                if eval_month_mask[ti]:
+                    s = torch.sigmoid(u_next.squeeze(0).squeeze(0)).cpu().numpy()
+                    y_score_list.append(s[ctx["valid_np"]])
+                    y_true_list.append(ctx["tensors"]["fire_indicator"][ti + 1].cpu().numpy()[ctx["valid_np"]])
+                u = u_next
+        y_true = np.concatenate(y_true_list)
+        y_score = np.concatenate(y_score_list)
+    else:
+        y_true = ctx["fire_ever_binary_np"][eval_pixel_mask]
+        y_score = pred_score[eval_pixel_mask]
+
+    valid_eval = ~np.isnan(y_score) & ~np.isnan(y_true)
+    y_true, y_score = y_true[valid_eval], y_score[valid_eval]
+
+    if len(np.unique(y_true)) < 2:
+        auc, ap = float("nan"), float("nan")
+    else:
+        auc = roc_auc_score(y_true, y_score)
+        ap = average_precision_score(y_true, y_score)
+
+    result = {"tag": tag, "n_eval": int(len(y_true)), "positive_frac": float(y_true.mean()) if len(y_true) else float("nan"),
+              "roc_auc": float(auc), "ap": float(ap), "train_time_sec": train_time, "epochs": epochs}
+    print(f"[{tag}] n={result['n_eval']} pos_frac={result['positive_frac']:.4f} "
+          f"AUC={result['roc_auc']:.4f} AP={result['ap']:.4f} ({train_time:.1f}s)")
+    return result
+
+
+def run_track_b1(ctx, device, n_folds=3, epochs=50):
+    print(f"\n=== Track B1: {n_folds}-fold spatial block CV (2deg x 2deg blocks) ===")
+    block_deg = 2.0
+    block_lon = np.floor((ctx["lon_grid"] - LON_MIN) / block_deg).astype(int)
+    block_lat = np.floor((ctx["lat_grid"] - LAT_MIN) / block_deg).astype(int)
+    block_id = block_lon * 1000 + block_lat
+    valid_blocks = np.unique(block_id[ctx["valid_np"]])
+    rng = np.random.RandomState(SEED)
+    perm = rng.permutation(valid_blocks)
+    folds = np.array_split(perm, n_folds)
+
+    results = []
+    for k in range(n_folds):
+        test_blocks = set(folds[k].tolist())
+        test_mask = np.isin(block_id, list(test_blocks))
+        train_mask = ctx["valid_np"] & ~test_mask
+        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B1_fold{k}", epochs=epochs)
+        results.append(r)
+    aucs = [r["roc_auc"] for r in results if not np.isnan(r["roc_auc"])]
+    print(f"Track B1 mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
+    return results
+
+
+def run_track_b2(ctx, device, n_regions=6, epochs=50):
+    print(f"\n=== Track B2: leave-one-region-out ({n_regions} KMeans regions) ===")
+    coords = np.stack([ctx["lon_grid"][ctx["valid_np"]], ctx["lat_grid"][ctx["valid_np"]]], axis=1)
+    km = KMeans(n_clusters=n_regions, random_state=SEED, n_init=10).fit(coords)
+    region_grid = np.full(ctx["lon_grid"].shape, -1, dtype=int)
+    region_grid[ctx["valid_np"]] = km.labels_
+
+    results = []
+    for r_id in range(n_regions):
+        test_mask = region_grid == r_id
+        train_mask = ctx["valid_np"] & ~test_mask
+        n_test = test_mask.sum()
+        if n_test < 20:
+            print(f"  region {r_id}: only {n_test} pixels, skipping (too small for a meaningful AUC)")
+            continue
+        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B2_region{r_id}", epochs=epochs)
+        results.append(r)
+    aucs = [r["roc_auc"] for r in results if not np.isnan(r["roc_auc"])]
+    print(f"Track B2 mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
+    return results
+
+
+def run_track_b3(ctx, device, test_frac=0.2, epochs=80):
+    print("\n=== Track B3: leave-years-out (temporal generalization, new) ===")
+    years = ctx["years_np"][:-1]  # aligned to the (n_months-1) prediction indices
+    unique_years = np.unique(years)
+    rng = np.random.RandomState(SEED)
+    n_test_years = max(1, int(len(unique_years) * test_frac))
+    test_years = set(rng.choice(unique_years, size=n_test_years, replace=False).tolist())
+    train_month_mask = np.array([y not in test_years for y in years])
+    eval_month_mask = ~train_month_mask
+    print(f"  Test years: {sorted(test_years)} ({eval_month_mask.sum()} held-out months)")
+
+    all_pixels = ctx["valid_np"]
+    r = train_and_eval(ctx, device, all_pixels, all_pixels, tag="B3_leave_years_out",
+                        epochs=epochs, train_month_mask=train_month_mask, eval_month_mask=eval_month_mask)
+    return [r]
+
+
+def run_data_efficiency_test(ctx, device, epochs=80):
+    print("\n=== Data-efficiency test: full-physics vs. no-physics, identical sparse supervision ===")
+    rng = np.random.RandomState(SEED)
+    valid_idx = np.argwhere(ctx["valid_np"])
+    n_test = int(len(valid_idx) * 0.2)
+    perm = rng.permutation(len(valid_idx))
+    test_idx, train_idx = valid_idx[perm[:n_test]], valid_idx[perm[n_test:]]
+    train_mask = np.zeros_like(ctx["valid_np"]); train_mask[train_idx[:, 0], train_idx[:, 1]] = True
+    test_mask = np.zeros_like(ctx["valid_np"]); test_mask[test_idx[:, 0], test_idx[:, 1]] = True
+
+    r_physics = train_and_eval(ctx, device, train_mask, test_mask, tag="dataeff_full_physics",
+                                epochs=epochs, use_physics=True)
+    r_nophysics = train_and_eval(ctx, device, train_mask, test_mask, tag="dataeff_no_physics",
+                                  epochs=epochs, use_physics=False)
+    print(f"Physics AUC={r_physics['roc_auc']:.4f} vs. No-physics AUC={r_nophysics['roc_auc']:.4f} "
+          f"(same architecture, same data, same split)")
+    return [r_physics, r_nophysics]
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--track", choices=["b1", "b2", "b3", "dataeff", "all"], default="all")
+    args = parser.parse_args()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+    ctx = load_data(device)
+    print(f"Valid pixels: {ctx['valid_np'].sum()}, months: {ctx['n_months']}")
+
+    all_results = {}
+    if args.track in ("b1", "all"):
+        all_results["B1"] = run_track_b1(ctx, device)
+    if args.track in ("b2", "all"):
+        all_results["B2"] = run_track_b2(ctx, device)
+    if args.track in ("b3", "all"):
+        all_results["B3"] = run_track_b3(ctx, device)
+    if args.track in ("dataeff", "all"):
+        all_results["dataeff"] = run_data_efficiency_test(ctx, device)
+
+    out_path = f"{CKPT_DIR}/cdr_pinn_validation_tracks_{args.track}.json"
+    with open(out_path, "w") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"\nSaved: {out_path}")

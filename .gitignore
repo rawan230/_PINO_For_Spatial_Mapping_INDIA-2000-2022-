@@ -1,0 +1,23 @@
+# ── Large/generated model checkpoints (reproducible by re-running the notebook) ────
+Model_Outputs/Checkpoints/*.pt
+Model_Outputs/*.tif
+
+# Keep the small, shareable results (must come after the excludes above):
+!Model_Outputs/*.csv
+!Model_Outputs/*.png
+!Model_Outputs/*.json
+
+# ── CDR-PINN: raw/generated data and checkpoints (reproducible via build_monthly_stacks.py + train*.py) ──
+CDR_PINN_Data/*.npz
+CDR_PINN_Data/*.pt
+
+# Keep the small, shareable result JSONs and figures:
+!CDR_PINN_Data/*.json
+!CDR_PINN_Data/*.png
+
+# ── Jupyter / Python / editor housekeeping ──────────────────────────────
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+.claude/
+.vscode/
