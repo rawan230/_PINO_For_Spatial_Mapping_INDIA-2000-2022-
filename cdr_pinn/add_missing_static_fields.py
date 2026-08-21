@@ -18,7 +18,11 @@ OUT_PATH = IN_PATH  # overwrite with the extended set
 
 
 def build_forest_frac_grid():
-    table = pq.read_table(PARQUET_PATH, columns=["lon", "lat", "forest_frac_recent"])
+    # forest_frac_recent (2020) and forest_frac_current (2022) were dropped from Step 6's
+    # parquet 2026-08-21 -- both fell inside the 2000-2022 pooled fire label window, a real
+    # reverse-causality leakage risk (post-fire LULC reclassification literature). Only
+    # forest_frac_baseline (2001) survives as the sole forest-fraction feature.
+    table = pq.read_table(PARQUET_PATH, columns=["lon", "lat", "forest_frac_baseline"])
     df = table.to_pandas()
     native_h, native_w = 3641, 3504
     native_transform = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, native_w, native_h)
@@ -27,7 +31,7 @@ def build_forest_frac_grid():
     rows = np.clip(rows.astype(int), 0, native_h - 1)
     cols = np.clip(cols.astype(int), 0, native_w - 1)
     grid = np.full((native_h, native_w), np.nan, dtype=np.float32)
-    grid[rows, cols] = df["forest_frac_recent"].values.astype(np.float32)
+    grid[rows, cols] = df["forest_frac_baseline"].values.astype(np.float32)
     return resample_to_target(grid, native_transform, TARGET_CRS)
 
 

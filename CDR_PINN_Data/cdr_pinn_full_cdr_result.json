@@ -7,14 +7,14 @@
   },
   "n_params": 1054613,
   "n_epochs": 80,
-  "train_time_sec": 343.10482907295227,
+  "train_time_sec": 250.10365533828735,
   "peak_gpu_mem_mb": 3240.6144,
-  "final_total_loss": 2.049797276655833,
-  "final_data_loss": 0.7234214891990026,
-  "final_pde_loss": 0.1656533951560656,
-  "final_bc_loss": 7.711233805215063e-05,
+  "final_total_loss": 2.0335080126921334,
+  "final_data_loss": 0.7284962683916092,
+  "final_pde_loss": 0.15482143809398016,
+  "final_bc_loss": 6.984981973801041e-05,
   "held_out_n": 4508,
   "held_out_positive_frac": 0.42058563232421875,
-  "held_out_roc_auc": 0.94059731618431,
-  "held_out_ap": 0.9253136330412538
+  "held_out_roc_auc": 0.9397288399532183,
+  "held_out_ap": 0.9233431278683849
 }
