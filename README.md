@@ -1,4 +1,38 @@
-# 🔥🧠 Step 8 — Physics-Informed Fire-Risk Model (PINN vs. baseline ladder)
+# 🔥🧠 Physics-Informed Neural Operator (PINO) for Forest-Fire Spatial Mapping — India (2000–2022)
+
+**This repository's headline contribution is the CDR-PINN**: a convection-diffusion-
+reaction (CDR) partial differential equation over a latent fire-susceptibility
+field, solved by a physics-informed Fourier neural operator (PINO, Li et al. 2023)
+and trained on 22 years (2000–2022) of real, monthly-resolved fire observations
+across India. Each governing-equation term maps to a distinct fire-behavior
+mechanism (vegetation/moisture-driven diffusion, terrain-driven advection,
+human-ignition-driven reaction), and global-in-time well-posedness of the equation
+is proven, not assumed.
+
+- **Implementation**: [`cdr_pinn/`](cdr_pinn/) — spectral differential operators,
+  FNO/PINO backbone with 3 physics heads, adaptive loss balancing, monthly data
+  pipeline, term-ablation/generalization-track/Jackknife/causal-weighting/
+  curriculum-learning/validation-split experiment scripts, all GPU-verified with
+  real results (see result JSONs in `CDR_PINN_Data/`, checkpoints excluded via
+  `.gitignore` as regeneratable).
+- **Design and full manuscript**: [`Design_and_Paper/`](Design_and_Paper/) — the PDE
+  construction and proofs for each term, the consolidated architecture/training
+  design, the full paper draft, methodology section, novelty/comparison argument
+  against Biswas, Mahato & Joshi (2025), and reviewer-facing Q&A clarifications.
+- **Headline results**: term-ablation AUC 0.602 (diffusion-only) → 0.941 (full CDR);
+  temporal generalization (leave-years-out) AUC 0.897; all three of the reference
+  paper's variable-understanding analyses (permutation importance, response curves,
+  Jackknife) reproduced, all five independent methods converging on near-total
+  elevation dominance. Full numbers: `Design_and_Paper/CDR_PINN_Full_Paper_Draft.md`.
+
+---
+
+## Also in this repository: Step 8 — Physics-Informed Fire-Risk Model (PINN vs. baseline ladder)
+
+The plain-monotonicity PINN ladder below **predates and is superseded by the
+CDR-PINN above** for this study's actual novel contribution — kept here as an
+honest, disclosed-negative-result baseline (the physics-informed monotonicity
+penalty did not measurably beat a same-capacity plain MLP).
 
 **Notebook:** [`Step8_PINN_FireRisk_Model.ipynb`](Step8_PINN_FireRisk_Model.ipynb)
 **Kernel:** `firerisk-anaconda3` (Python 3.12.7, base `C:\Users\Admin\anaconda3\python.exe`)
