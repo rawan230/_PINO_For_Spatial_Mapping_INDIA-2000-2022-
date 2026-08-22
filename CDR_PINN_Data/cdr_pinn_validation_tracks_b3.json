@@ -1,13 +1,13 @@
 {
   "B3": [
     {
-      "tag": "B3_leave_years_out",
-      "n_eval": 856596,
-      "positive_frac": 0.0246382188051939,
-      "roc_auc": 0.8966560725390572,
-      "ap": 0.14335543646251475,
-      "train_time_sec": 361.9254961013794,
-      "epochs": 80
+      "tag": "B3_leave_years_out_physics_seed42",
+      "roc_auc": 0.896026942505993,
+      "ap": 0.14450589421772192,
+      "train_time_sec": 358.49049854278564,
+      "epochs_run": 75,
+      "best_epoch": 55,
+      "best_val_auc": 0.8999326903500855
     }
   ]
 }

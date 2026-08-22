@@ -74,7 +74,8 @@ def load_data(device):
 
 def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
                     epochs=80, term_flags=FULL_CDR, use_physics=True,
-                    train_month_mask=None, eval_month_mask=None, seed=SEED):
+                    train_month_mask=None, eval_month_mask=None, seed=SEED,
+                    val_frac=0.1875, val_every=5, patience=4):
     """train_pixel_mask/test_pixel_mask: (H,W) bool -- which pixels' data-loss
     supervision is used for training vs. held out for evaluation (spatial split).
     train_month_mask/eval_month_mask: (n_months-1,) bool, optional -- which
@@ -84,17 +85,51 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     seed: model-init/training-noise seed -- fold/region/year assignment stays
     fixed across seeds (set with the module-level SEED constant in each track
     function) so multi-seed runs vary only the model's own stochasticity, not
-    which pixels/years land in which split."""
+    which pixels/years land in which split.
+
+    Genuine validation-set-driven early stopping (previously missing here --
+    every B1/B2/B3/data-efficiency/multiseed run trained for a fixed epoch
+    budget with no validation monitoring at all, unlike train_standard_protocol.py's
+    Track A run, which already does this). val_frac=0.1875 of the TRAIN portion
+    is carved out as validation (never touches test_pixel_mask/test years), giving
+    ~65/15/20 overall on an 80/20 track split -- matching the standard protocol's
+    ratios. For a spatial split (B1/B2/data-eff/multiseed A), validation pixels are
+    carved from train_pixel_mask. For a temporal split (B3, train_month_mask given
+    and different from eval_month_mask), validation TRAIN YEARS are carved instead
+    (pixel-level val makes no sense when the held-out dimension is time)."""
     torch.manual_seed(seed)
     H, W, n_months = ctx["H"], ctx["W"], ctx["n_months"]
     t_ = ctx["tensors"]
     valid_mask = torch.tensor(ctx["valid_np"], dtype=torch.bool, device=device)
     boundary_mask = torch.tensor(ctx["boundary_np"], dtype=torch.bool, device=device)
-    train_data_mask = torch.tensor(ctx["valid_np"] & train_pixel_mask, dtype=torch.bool, device=device)
     lat_rad, dlon_rad, dlat_rad = ctx["lat_rad"], ctx["dlon_rad"], ctx["dlat_rad"]
 
-    if train_month_mask is None:
-        train_month_mask = np.ones(n_months - 1, dtype=bool)
+    is_temporal_split = (train_month_mask is not None) and (eval_month_mask is not None) \
+        and not np.array_equal(train_month_mask, eval_month_mask)
+
+    val_rng = np.random.RandomState(seed + 1000)
+    if is_temporal_split:
+        # Carve validation YEARS out of the train years only (test years untouched).
+        train_years_present = sorted(set(ctx["years_np"][:-1][train_month_mask].tolist()))
+        n_val_years = max(1, int(round(len(train_years_present) * val_frac)))
+        val_years = set(val_rng.choice(train_years_present, size=n_val_years, replace=False).tolist())
+        fit_month_mask = train_month_mask & np.array([y not in val_years for y in ctx["years_np"][:-1]])
+        val_month_mask = train_month_mask & np.array([y in val_years for y in ctx["years_np"][:-1]])
+        val_pixel_mask_for_eval = ctx["valid_np"]  # all pixels, val split is temporal here
+        train_data_mask = torch.tensor(ctx["valid_np"] & train_pixel_mask, dtype=torch.bool, device=device)
+    else:
+        # Carve validation PIXELS out of the train pixel mask only (test pixels untouched).
+        train_idx = np.argwhere(ctx["valid_np"] & train_pixel_mask)
+        perm = val_rng.permutation(len(train_idx))
+        n_val = int(len(train_idx) * val_frac)
+        val_idx, fit_idx = train_idx[perm[:n_val]], train_idx[perm[n_val:]]
+        fit_pixel_mask = np.zeros_like(ctx["valid_np"]); fit_pixel_mask[fit_idx[:, 0], fit_idx[:, 1]] = True
+        val_pixel_mask_for_eval = np.zeros_like(ctx["valid_np"]); val_pixel_mask_for_eval[val_idx[:, 0], val_idx[:, 1]] = True
+        train_data_mask = torch.tensor(fit_pixel_mask, dtype=torch.bool, device=device)
+        fit_month_mask = train_month_mask if train_month_mask is not None else np.ones(n_months - 1, dtype=bool)
+        val_month_mask = fit_month_mask  # same months, held-out pixels
+
+    train_month_mask = fit_month_mask
     if eval_month_mask is None:
         eval_month_mask = np.ones(n_months - 1, dtype=bool)
 
@@ -116,6 +151,43 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
             "dist_roads": t_["dist_roads"].unsqueeze(0),
         }
 
+    from losses import lse_pool as _lse_pool
+
+    def rollout_auc(model_, eval_pixel_mask_np, month_mask_np, temporal_per_month=False):
+        """Shared scoring path for validation checks and the final test eval --
+        identical LSE-pooled-over-eval-months logic either way, so a validation
+        AUC and the final test AUC are directly comparable numbers."""
+        model_.eval()
+        with torch.no_grad():
+            u_ = torch.zeros(1, 1, H, W, device=device)
+            if temporal_per_month:
+                y_true_list, y_score_list = [], []
+                for ti in range(n_months - 1):
+                    u_next_ = model_(u_, covariate_stack(ti))
+                    if month_mask_np[ti]:
+                        s = torch.sigmoid(u_next_.squeeze(0).squeeze(0)).cpu().numpy()
+                        y_score_list.append(s[eval_pixel_mask_np])
+                        y_true_list.append(t_["fire_indicator"][ti + 1].cpu().numpy()[eval_pixel_mask_np])
+                    u_ = u_next_
+                y_true, y_score = np.concatenate(y_true_list), np.concatenate(y_score_list)
+            else:
+                scores = []
+                for ti in range(n_months - 1):
+                    u_next_ = model_(u_, covariate_stack(ti))
+                    if month_mask_np[ti]:
+                        scores.append(torch.sigmoid(u_next_.squeeze(0).squeeze(0)))
+                    u_ = u_next_
+                score_stack = torch.stack(scores, dim=0)
+                pooled = _lse_pool(score_stack, dim=0, tau=5.0).cpu().numpy()
+                y_true = ctx["fire_ever_binary_np"][eval_pixel_mask_np]
+                y_score = pooled[eval_pixel_mask_np]
+        model_.train()
+        valid_ = ~np.isnan(y_score) & ~np.isnan(y_true)
+        y_true, y_score = y_true[valid_], y_score[valid_]
+        if len(np.unique(y_true)) < 2:
+            return float("nan"), float("nan")
+        return roc_auc_score(y_true, y_score), average_precision_score(y_true, y_score)
+
     model = CDRPINN(n_static_channels=7, width=WIDTH, modes_h=MODES, modes_w=MODES, n_layers=N_LAYERS).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LR)
     # Cosine LR decay -- added specifically to test the hypothesis that the width=64
@@ -127,6 +199,8 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=LR / 100)
     loss_names = ["data", "ic"] if not use_physics else ["data", "pde", "bc", "ic"]
     balancer = AdaptiveLossBalancer(loss_names, update_every=5)
+
+    best_val_auc, best_epoch, best_state, epochs_since_improve = -1.0, 0, None, 0
 
     t_start = time.time()
     for epoch in range(epochs):
@@ -192,62 +266,39 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
 
         scheduler.step()
 
+        # ---- Validation-based checkpoint selection + early stopping (this is the
+        # fix: every track previously trained for a fixed epoch budget with zero
+        # validation monitoring, unlike train_standard_protocol.py's Track A). ----
+        if (epoch + 1) % val_every == 0 or epoch == epochs - 1:
+            val_auc, val_ap = rollout_auc(model, val_pixel_mask_for_eval, val_month_mask,
+                                           temporal_per_month=is_temporal_split)
+            improved = (not np.isnan(val_auc)) and (val_auc > best_val_auc)
+            print(f"  [{tag}] epoch {epoch+1}/{epochs}  val_AUC={val_auc:.4f}"
+                  + ("  <- best" if improved else ""))
+            if improved:
+                best_val_auc, best_epoch = val_auc, epoch + 1
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                epochs_since_improve = 0
+            else:
+                epochs_since_improve += 1
+            if epochs_since_improve >= patience:
+                print(f"  [{tag}] early stop at epoch {epoch+1} (no val_AUC improvement in {patience} checks)")
+                break
+
     train_time = time.time() - t_start
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
-    # ---- Evaluation: full rollout, no grad, LSE-pooled score over EVAL months only.
-    #      NOTE: an earlier version of this evaluation used a hard max-pool here,
-    #      which does NOT match what training actually optimizes (data_loss_terminal
-    #      uses LSE-pooling, tau=5 -- losses.py's lse_pool). That mismatch between the
-    #      training objective and the evaluation metric is a real bug, not a stylistic
-    #      choice -- fixed here to use the identical LSE-pool the model was trained
-    #      against, for a fair, consistent readout of what the model actually learned. ----
-    from losses import lse_pool as _lse_pool
-    model.eval()
-    with torch.no_grad():
-        u = torch.zeros(1, 1, H, W, device=device)
-        scores = []
-        for ti in range(n_months - 1):
-            u_next = model(u, covariate_stack(ti))
-            if eval_month_mask[ti]:
-                scores.append(torch.sigmoid(u_next.squeeze(0).squeeze(0)))
-            u = u_next
-        score_stack = torch.stack(scores, dim=0)  # (T_eval, H, W)
-        pooled = _lse_pool(score_stack, dim=0, tau=5.0)
-        pred_score = pooled.cpu().numpy()
-
+    # ---- Final test evaluation, on the true held-out test_pixel_mask/test years
+    # (never touched by training or by the validation carve-out above), using the
+    # best-val-AUC checkpoint -- same LSE-pooled scoring path as validation. ----
     eval_pixel_mask = ctx["valid_np"] & test_pixel_mask
-    if train_month_mask is not None and not np.array_equal(train_month_mask, eval_month_mask):
-        # Track B3: evaluate on TEST-YEAR months specifically, per-month AUC over ALL valid pixels
-        # (not spatially held out -- the split here is temporal, not spatial)
-        y_true_list, y_score_list = [], []
-        with torch.no_grad():
-            u = torch.zeros(1, 1, H, W, device=device)
-            for ti in range(n_months - 1):
-                u_next = model(u, covariate_stack(ti))
-                if eval_month_mask[ti]:
-                    s = torch.sigmoid(u_next.squeeze(0).squeeze(0)).cpu().numpy()
-                    y_score_list.append(s[ctx["valid_np"]])
-                    y_true_list.append(ctx["tensors"]["fire_indicator"][ti + 1].cpu().numpy()[ctx["valid_np"]])
-                u = u_next
-        y_true = np.concatenate(y_true_list)
-        y_score = np.concatenate(y_score_list)
-    else:
-        y_true = ctx["fire_ever_binary_np"][eval_pixel_mask]
-        y_score = pred_score[eval_pixel_mask]
+    auc, ap = rollout_auc(model, eval_pixel_mask, eval_month_mask, temporal_per_month=is_temporal_split)
 
-    valid_eval = ~np.isnan(y_score) & ~np.isnan(y_true)
-    y_true, y_score = y_true[valid_eval], y_score[valid_eval]
-
-    if len(np.unique(y_true)) < 2:
-        auc, ap = float("nan"), float("nan")
-    else:
-        auc = roc_auc_score(y_true, y_score)
-        ap = average_precision_score(y_true, y_score)
-
-    result = {"tag": tag, "n_eval": int(len(y_true)), "positive_frac": float(y_true.mean()) if len(y_true) else float("nan"),
-              "roc_auc": float(auc), "ap": float(ap), "train_time_sec": train_time, "epochs": epochs}
-    print(f"[{tag}] n={result['n_eval']} pos_frac={result['positive_frac']:.4f} "
-          f"AUC={result['roc_auc']:.4f} AP={result['ap']:.4f} ({train_time:.1f}s)")
+    result = {"tag": tag, "roc_auc": float(auc), "ap": float(ap), "train_time_sec": train_time,
+              "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc)}
+    print(f"[{tag}] AUC={result['roc_auc']:.4f} AP={result['ap']:.4f}  "
+          f"(best val_AUC={best_val_auc:.4f} @ epoch {best_epoch}, stopped @ {epoch+1}/{epochs}, {train_time:.1f}s)")
     return result
 
 

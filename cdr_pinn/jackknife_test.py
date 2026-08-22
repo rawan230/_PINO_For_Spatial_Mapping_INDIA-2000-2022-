@@ -32,7 +32,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 from model import CDRPINN
 from losses import data_loss_monthly, data_loss_terminal, pde_loss, bc_loss, ic_loss, AdaptiveLossBalancer, lse_pool
 from build_monthly_stacks import LON_MIN, LON_MAX, LAT_MIN, LAT_MAX, TARGET_H, TARGET_W
-from train import build_masks
+from preprocessing import build_masks_3way
 
 DATA_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz"
 OUT_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_jackknife_results.json"
@@ -49,7 +49,8 @@ COVARIATES = ["ndvi_f1", "ndvi_anomaly", "forest_frac", "dryness", "slope", "dis
 
 def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, valid_mask, boundary_mask,
               train_data_mask, fire_indicator, fire_ever_frac, lat_rad, dlon_rad, dlat_rad, pos_weight,
-              n_months, H, W, test_np, valid_np, fire_ever_binary_np):
+              n_months, H, W, test_np, valid_np, fire_ever_binary_np, val_np,
+              val_every=5, patience=4):
     """covariate_mode: 'all' | 'without' | 'only'. held_out_or_only: covariate name (ignored if mode=='all')."""
     torch.manual_seed(SEED)
 
@@ -79,9 +80,33 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
             "dist_roads": cov_value("dist_roads", ti).unsqueeze(0),
         }
 
+    def rollout_auc(model_, eval_mask_np):
+        """Same LSE-pooled scoring path used for validation checks and the final
+        test eval -- shared with run_validation_tracks.py's identical fix."""
+        model_.eval()
+        with torch.no_grad():
+            u_ = torch.zeros(1, 1, H, W, device=device)
+            scores = []
+            for ti in range(n_months - 1):
+                u_next_ = model_(u_, covariate_stack(ti))
+                scores.append(torch.sigmoid(u_next_.squeeze(0).squeeze(0)))
+                u_ = u_next_
+            pooled_ = lse_pool(torch.stack(scores, dim=0), dim=0, tau=5.0).cpu().numpy()
+        model_.train()
+        y_true_ = fire_ever_binary_np[eval_mask_np]
+        y_score_ = pooled_[eval_mask_np]
+        ok_ = ~np.isnan(y_score_) & ~np.isnan(y_true_)
+        y_true_, y_score_ = y_true_[ok_], y_score_[ok_]
+        if len(np.unique(y_true_)) < 2:
+            return float("nan"), float("nan")
+        return roc_auc_score(y_true_, y_score_), average_precision_score(y_true_, y_score_)
+
     model = CDRPINN(n_static_channels=7, width=WIDTH, modes_h=MODES, modes_w=MODES, n_layers=N_LAYERS).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LR)
     balancer = AdaptiveLossBalancer(["data", "pde", "bc", "ic"], update_every=5)
+
+    best_val_auc, best_epoch, best_state, epochs_since_improve = -1.0, 0, None, 0
+    val_eval_mask = valid_np & val_np
 
     t_start = time.time()
     for epoch in range(epochs):
@@ -122,25 +147,28 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
         if torch.isnan(total):
             break
 
+        # Validation-based checkpoint selection + early stopping -- previously
+        # missing (fixed epoch budget only), same fix as run_validation_tracks.py.
+        if (epoch + 1) % val_every == 0 or epoch == epochs - 1:
+            val_auc, _ = rollout_auc(model, val_eval_mask)
+            improved = (not np.isnan(val_auc)) and (val_auc > best_val_auc)
+            if improved:
+                best_val_auc, best_epoch = val_auc, epoch + 1
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                epochs_since_improve = 0
+            else:
+                epochs_since_improve += 1
+            if epochs_since_improve >= patience:
+                break
+
     train_time = time.time() - t_start
-    model.eval()
-    with torch.no_grad():
-        u = torch.zeros(1, 1, H, W, device=device)
-        scores = []
-        for ti in range(n_months - 1):
-            u_next = model(u, covariate_stack(ti))
-            scores.append(torch.sigmoid(u_next.squeeze(0).squeeze(0)))
-            u = u_next
-        pooled = lse_pool(torch.stack(scores, dim=0), dim=0, tau=5.0).cpu().numpy()
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     eval_mask = valid_np & test_np
-    y_true = fire_ever_binary_np[eval_mask]
-    y_score = pooled[eval_mask]
-    ok = ~np.isnan(y_score) & ~np.isnan(y_true)
-    y_true, y_score = y_true[ok], y_score[ok]
-    auc = roc_auc_score(y_true, y_score)
-    ap = average_precision_score(y_true, y_score)
-    return {"auc": auc, "ap": ap, "train_time_sec": train_time}
+    auc, ap = rollout_auc(model, eval_mask)
+    return {"auc": auc, "ap": ap, "train_time_sec": train_time,
+            "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc)}
 
 
 def main():
@@ -159,7 +187,7 @@ def main():
         return torch.tensor(np.nan_to_num(x, nan=0.0), dtype=torch.float32, device=device)
 
     ndvi_f1_np = d["ndvi_f1"]
-    valid_np, boundary_np, train_np, test_np = build_masks(ndvi_f1_np)
+    valid_np, boundary_np, train_np, val_np, test_np = build_masks_3way(ndvi_f1_np)
     valid_mask = torch.tensor(valid_np, dtype=torch.bool, device=device)
     boundary_mask = torch.tensor(boundary_np, dtype=torch.bool, device=device)
     train_data_mask = torch.tensor(valid_np & train_np, dtype=torch.bool, device=device)
@@ -190,7 +218,7 @@ def main():
                   train_data_mask=train_data_mask, fire_indicator=fire_indicator, fire_ever_frac=fire_ever_frac,
                   lat_rad=lat_rad, dlon_rad=dlon_rad, dlat_rad=dlat_rad, pos_weight=pos_weight,
                   n_months=n_months, H=H, W=W, test_np=test_np, valid_np=valid_np,
-                  fire_ever_binary_np=fire_ever_binary_np)
+                  fire_ever_binary_np=fire_ever_binary_np, val_np=val_np)
 
     results = {}
     t0 = time.time()

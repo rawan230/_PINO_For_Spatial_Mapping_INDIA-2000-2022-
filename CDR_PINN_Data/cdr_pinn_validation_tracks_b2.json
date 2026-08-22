@@ -1,58 +1,58 @@
 {
   "B2": [
     {
-      "tag": "B2_region0",
-      "n_eval": 4471,
-      "positive_frac": 0.1847461462020874,
-      "roc_auc": 0.5096711140339515,
-      "ap": 0.26877519647108655,
-      "train_time_sec": 215.29396224021912,
-      "epochs": 50
+      "tag": "B2_region0_physics_seed42",
+      "roc_auc": 0.5386532348867565,
+      "ap": 0.30471360568728734,
+      "train_time_sec": 246.91811084747314,
+      "epochs_run": 50,
+      "best_epoch": 40,
+      "best_val_auc": 0.939645362110352
     },
     {
-      "tag": "B2_region1",
-      "n_eval": 4999,
-      "positive_frac": 0.50210040807724,
-      "roc_auc": 0.6418947752581478,
-      "ap": 0.6211129159194517,
-      "train_time_sec": 217.48420357704163,
-      "epochs": 50
+      "tag": "B2_region1_physics_seed42",
+      "roc_auc": 0.6804575990933814,
+      "ap": 0.6335207786323478,
+      "train_time_sec": 268.2801580429077,
+      "epochs_run": 50,
+      "best_epoch": 45,
+      "best_val_auc": 0.9348519610799132
     },
     {
-      "tag": "B2_region2",
-      "n_eval": 2613,
-      "positive_frac": 0.45579794049263,
-      "roc_auc": 0.4929192336806404,
-      "ap": 0.4490571390527337,
-      "train_time_sec": 215.04560375213623,
-      "epochs": 50
+      "tag": "B2_region2_physics_seed42",
+      "roc_auc": 0.5505765227013194,
+      "ap": 0.4621932874815533,
+      "train_time_sec": 245.78271889686584,
+      "epochs_run": 50,
+      "best_epoch": 40,
+      "best_val_auc": 0.9457854775273766
     },
     {
-      "tag": "B2_region3",
-      "n_eval": 2401,
-      "positive_frac": 0.666388988494873,
-      "roc_auc": 0.7322776217228465,
-      "ap": 0.8157289216215494,
-      "train_time_sec": 218.20316648483276,
-      "epochs": 50
+      "tag": "B2_region3_physics_seed42",
+      "roc_auc": 0.7300811485642946,
+      "ap": 0.8143359234179979,
+      "train_time_sec": 241.17160034179688,
+      "epochs_run": 50,
+      "best_epoch": 35,
+      "best_val_auc": 0.9374507534263787
     },
     {
-      "tag": "B2_region4",
-      "n_eval": 3912,
-      "positive_frac": 0.26150307059288025,
-      "roc_auc": 0.5875246620900323,
-      "ap": 0.3154831637317811,
-      "train_time_sec": 213.82972741127014,
-      "epochs": 50
+      "tag": "B2_region4_physics_seed42",
+      "roc_auc": 0.6156660904424949,
+      "ap": 0.3448936211562314,
+      "train_time_sec": 226.91516613960266,
+      "epochs_run": 50,
+      "best_epoch": 40,
+      "best_val_auc": 0.9361609698872122
     },
     {
-      "tag": "B2_region5",
-      "n_eval": 4146,
-      "positive_frac": 0.48504582047462463,
-      "roc_auc": 0.6291387998327699,
-      "ap": 0.595594188137675,
-      "train_time_sec": 205.27144765853882,
-      "epochs": 50
+      "tag": "B2_region5_physics_seed42",
+      "roc_auc": 0.5970451742582075,
+      "ap": 0.5664279305575597,
+      "train_time_sec": 259.36411213874817,
+      "epochs_run": 50,
+      "best_epoch": 40,
+      "best_val_auc": 0.9472033833807593
     }
   ]
 }
