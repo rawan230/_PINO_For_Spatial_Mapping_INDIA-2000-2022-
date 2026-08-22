@@ -74,14 +74,18 @@ def load_data(device):
 
 def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
                     epochs=80, term_flags=FULL_CDR, use_physics=True,
-                    train_month_mask=None, eval_month_mask=None):
+                    train_month_mask=None, eval_month_mask=None, seed=SEED):
     """train_pixel_mask/test_pixel_mask: (H,W) bool -- which pixels' data-loss
     supervision is used for training vs. held out for evaluation (spatial split).
     train_month_mask/eval_month_mask: (n_months-1,) bool, optional -- which
     MONTHS' data-loss supervision is used for training vs. evaluation (temporal
     split, Track B3). If None, all months are used for both (spatial-only split).
-    use_physics=False zeroes out the PDE+BC loss entirely (data-efficiency test)."""
-    torch.manual_seed(SEED)
+    use_physics=False zeroes out the PDE+BC loss entirely (data-efficiency test).
+    seed: model-init/training-noise seed -- fold/region/year assignment stays
+    fixed across seeds (set with the module-level SEED constant in each track
+    function) so multi-seed runs vary only the model's own stochasticity, not
+    which pixels/years land in which split."""
+    torch.manual_seed(seed)
     H, W, n_months = ctx["H"], ctx["W"], ctx["n_months"]
     t_ = ctx["tensors"]
     valid_mask = torch.tensor(ctx["valid_np"], dtype=torch.bool, device=device)
@@ -247,14 +251,15 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     return result
 
 
-def run_track_b1(ctx, device, n_folds=3, epochs=50):
-    print(f"\n=== Track B1: {n_folds}-fold spatial block CV (2deg x 2deg blocks) ===")
+def run_track_b1(ctx, device, n_folds=3, epochs=50, use_physics=True, seed=SEED):
+    tag_suffix = "physics" if use_physics else "nophysics"
+    print(f"\n=== Track B1: {n_folds}-fold spatial block CV (2deg x 2deg blocks) [{tag_suffix}, seed={seed}] ===")
     block_deg = 2.0
     block_lon = np.floor((ctx["lon_grid"] - LON_MIN) / block_deg).astype(int)
     block_lat = np.floor((ctx["lat_grid"] - LAT_MIN) / block_deg).astype(int)
     block_id = block_lon * 1000 + block_lat
     valid_blocks = np.unique(block_id[ctx["valid_np"]])
-    rng = np.random.RandomState(SEED)
+    rng = np.random.RandomState(SEED)  # fold assignment stays fixed across seeds/physics-toggle for a fair comparison
     perm = rng.permutation(valid_blocks)
     folds = np.array_split(perm, n_folds)
 
@@ -263,17 +268,19 @@ def run_track_b1(ctx, device, n_folds=3, epochs=50):
         test_blocks = set(folds[k].tolist())
         test_mask = np.isin(block_id, list(test_blocks))
         train_mask = ctx["valid_np"] & ~test_mask
-        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B1_fold{k}", epochs=epochs)
+        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B1_fold{k}_{tag_suffix}_seed{seed}",
+                            epochs=epochs, use_physics=use_physics, seed=seed)
         results.append(r)
     aucs = [r["roc_auc"] for r in results if not np.isnan(r["roc_auc"])]
-    print(f"Track B1 mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
+    print(f"Track B1 [{tag_suffix}, seed={seed}] mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
     return results
 
 
-def run_track_b2(ctx, device, n_regions=6, epochs=50):
-    print(f"\n=== Track B2: leave-one-region-out ({n_regions} KMeans regions) ===")
+def run_track_b2(ctx, device, n_regions=6, epochs=50, use_physics=True, seed=SEED):
+    tag_suffix = "physics" if use_physics else "nophysics"
+    print(f"\n=== Track B2: leave-one-region-out ({n_regions} KMeans regions) [{tag_suffix}, seed={seed}] ===")
     coords = np.stack([ctx["lon_grid"][ctx["valid_np"]], ctx["lat_grid"][ctx["valid_np"]]], axis=1)
-    km = KMeans(n_clusters=n_regions, random_state=SEED, n_init=10).fit(coords)
+    km = KMeans(n_clusters=n_regions, random_state=SEED, n_init=10).fit(coords)  # region assignment fixed across seeds/physics-toggle
     region_grid = np.full(ctx["lon_grid"].shape, -1, dtype=int)
     region_grid[ctx["valid_np"]] = km.labels_
 
@@ -285,18 +292,20 @@ def run_track_b2(ctx, device, n_regions=6, epochs=50):
         if n_test < 20:
             print(f"  region {r_id}: only {n_test} pixels, skipping (too small for a meaningful AUC)")
             continue
-        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B2_region{r_id}", epochs=epochs)
+        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"B2_region{r_id}_{tag_suffix}_seed{seed}",
+                            epochs=epochs, use_physics=use_physics, seed=seed)
         results.append(r)
     aucs = [r["roc_auc"] for r in results if not np.isnan(r["roc_auc"])]
-    print(f"Track B2 mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
+    print(f"Track B2 [{tag_suffix}, seed={seed}] mean AUC: {np.mean(aucs):.4f} +/- {np.std(aucs):.4f}")
     return results
 
 
-def run_track_b3(ctx, device, test_frac=0.2, epochs=80):
-    print("\n=== Track B3: leave-years-out (temporal generalization, new) ===")
+def run_track_b3(ctx, device, test_frac=0.2, epochs=80, use_physics=True, seed=SEED):
+    tag_suffix = "physics" if use_physics else "nophysics"
+    print(f"\n=== Track B3: leave-years-out (temporal generalization) [{tag_suffix}, seed={seed}] ===")
     years = ctx["years_np"][:-1]  # aligned to the (n_months-1) prediction indices
     unique_years = np.unique(years)
-    rng = np.random.RandomState(SEED)
+    rng = np.random.RandomState(SEED)  # held-out years stay fixed across seeds/physics-toggle for a fair comparison
     n_test_years = max(1, int(len(unique_years) * test_frac))
     test_years = set(rng.choice(unique_years, size=n_test_years, replace=False).tolist())
     train_month_mask = np.array([y not in test_years for y in years])
@@ -304,8 +313,9 @@ def run_track_b3(ctx, device, test_frac=0.2, epochs=80):
     print(f"  Test years: {sorted(test_years)} ({eval_month_mask.sum()} held-out months)")
 
     all_pixels = ctx["valid_np"]
-    r = train_and_eval(ctx, device, all_pixels, all_pixels, tag="B3_leave_years_out",
-                        epochs=epochs, train_month_mask=train_month_mask, eval_month_mask=eval_month_mask)
+    r = train_and_eval(ctx, device, all_pixels, all_pixels, tag=f"B3_leave_years_out_{tag_suffix}_seed{seed}",
+                        epochs=epochs, use_physics=use_physics, seed=seed,
+                        train_month_mask=train_month_mask, eval_month_mask=eval_month_mask)
     return [r]
 
 
@@ -328,9 +338,60 @@ def run_data_efficiency_test(ctx, device, epochs=80):
     return [r_physics, r_nophysics]
 
 
+def run_physics_vs_nophysics_all_tracks(ctx, device):
+    """The item repeatedly flagged throughout this study as the single most
+    important unresolved experiment: physics-vs-no-physics was previously only
+    tested on Track A (random split). This runs it on B1/B2/B3 too -- the harder
+    tracks, where the literature predicts a physics-informed advantage should
+    actually appear under distribution shift, if it exists at all."""
+    results = {}
+    for track_name, fn in [("B1", run_track_b1), ("B2", run_track_b2), ("B3", run_track_b3)]:
+        print(f"\n{'='*70}\nTrack {track_name}: physics vs. no-physics\n{'='*70}")
+        r_physics = fn(ctx, device, use_physics=True)
+        r_nophysics = fn(ctx, device, use_physics=False)
+        aucs_p = [r["roc_auc"] for r in r_physics if not np.isnan(r["roc_auc"])]
+        aucs_np = [r["roc_auc"] for r in r_nophysics if not np.isnan(r["roc_auc"])]
+        mean_p, mean_np = float(np.mean(aucs_p)), float(np.mean(aucs_np))
+        print(f"\n>>> Track {track_name} SUMMARY: physics={mean_p:.4f}, no-physics={mean_np:.4f}, "
+              f"delta={mean_p - mean_np:+.4f} ({'physics helps' if mean_p > mean_np else 'no physics advantage'})")
+        results[track_name] = {
+            "physics": r_physics, "no_physics": r_nophysics,
+            "physics_mean_auc": mean_p, "no_physics_mean_auc": mean_np,
+            "delta": mean_p - mean_np,
+        }
+    return results
+
+
+def run_multiseed_track_a(ctx, device, seeds=(42, 43, 44), epochs=80):
+    """Multi-seed robustness for the study's single most-cited number (Track A /
+    full CDR random-split AUC) -- item 4 of the CDR-PINN completeness audit.
+    Full multi-seed x all-tracks x physics-toggle would be ~180 runs, well beyond
+    this pass's scope; this specifically targets the headline number, the one
+    every other comparison in the paper is anchored to."""
+    print(f"\n{'='*70}\nMulti-seed Track A (full CDR, random split): seeds={seeds}\n{'='*70}")
+    rng = np.random.RandomState(SEED)  # split itself fixed across seeds -- only model init/training noise varies
+    valid_idx = np.argwhere(ctx["valid_np"])
+    n_test = int(len(valid_idx) * 0.2)
+    perm = rng.permutation(len(valid_idx))
+    test_idx, train_idx = valid_idx[perm[:n_test]], valid_idx[perm[n_test:]]
+    train_mask = np.zeros_like(ctx["valid_np"]); train_mask[train_idx[:, 0], train_idx[:, 1]] = True
+    test_mask = np.zeros_like(ctx["valid_np"]); test_mask[test_idx[:, 0], test_idx[:, 1]] = True
+
+    results = []
+    for s in seeds:
+        r = train_and_eval(ctx, device, train_mask, test_mask, tag=f"trackA_multiseed_seed{s}",
+                            epochs=epochs, seed=s)
+        results.append(r)
+        print(f"  seed={s}: AUC={r['roc_auc']:.4f}")
+    aucs = [r["roc_auc"] for r in results if not np.isnan(r["roc_auc"])]
+    mean_auc, std_auc = float(np.mean(aucs)), float(np.std(aucs))
+    print(f">>> Multi-seed Track A: {mean_auc:.4f} +/- {std_auc:.4f} (n={len(aucs)} seeds)")
+    return {"per_seed": results, "mean_auc": mean_auc, "std_auc": std_auc, "seeds": list(seeds)}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--track", choices=["b1", "b2", "b3", "dataeff", "all"], default="all")
+    parser.add_argument("--track", choices=["b1", "b2", "b3", "dataeff", "physics_vs_nophysics_all", "multiseed_a", "all"], default="all")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -347,6 +408,10 @@ if __name__ == "__main__":
         all_results["B3"] = run_track_b3(ctx, device)
     if args.track in ("dataeff", "all"):
         all_results["dataeff"] = run_data_efficiency_test(ctx, device)
+    if args.track == "physics_vs_nophysics_all":
+        all_results["physics_vs_nophysics_all_tracks"] = run_physics_vs_nophysics_all_tracks(ctx, device)
+    if args.track == "multiseed_a":
+        all_results["multiseed_track_a"] = run_multiseed_track_a(ctx, device)
 
     out_path = f"{CKPT_DIR}/cdr_pinn_validation_tracks_{args.track}.json"
     with open(out_path, "w") as f:
