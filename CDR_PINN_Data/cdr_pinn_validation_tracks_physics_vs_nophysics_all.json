@@ -1,0 +1,211 @@
+{
+  "physics_vs_nophysics_all_tracks": {
+    "B1": {
+      "physics": [
+        {
+          "tag": "B1_fold0_physics_seed42",
+          "n_eval": 7196,
+          "positive_frac": 0.4031406342983246,
+          "roc_auc": 0.7679751552894731,
+          "ap": 0.6488707870995485,
+          "train_time_sec": 186.15854573249817,
+          "epochs": 50
+        },
+        {
+          "tag": "B1_fold1_physics_seed42",
+          "n_eval": 7857,
+          "positive_frac": 0.33053329586982727,
+          "roc_auc": 0.764902688243674,
+          "ap": 0.6425212402617692,
+          "train_time_sec": 196.08716821670532,
+          "epochs": 50
+        },
+        {
+          "tag": "B1_fold2_physics_seed42",
+          "n_eval": 7489,
+          "positive_frac": 0.4891173839569092,
+          "roc_auc": 0.7457317127991461,
+          "ap": 0.6961202281252344,
+          "train_time_sec": 157.30497694015503,
+          "epochs": 50
+        }
+      ],
+      "no_physics": [
+        {
+          "tag": "B1_fold0_nophysics_seed42",
+          "n_eval": 7196,
+          "positive_frac": 0.4031406342983246,
+          "roc_auc": 0.7625680839853305,
+          "ap": 0.7036931998906814,
+          "train_time_sec": 89.09713220596313,
+          "epochs": 50
+        },
+        {
+          "tag": "B1_fold1_nophysics_seed42",
+          "n_eval": 7857,
+          "positive_frac": 0.33053329586982727,
+          "roc_auc": 0.7285145114793175,
+          "ap": 0.5737901775995433,
+          "train_time_sec": 61.63844609260559,
+          "epochs": 50
+        },
+        {
+          "tag": "B1_fold2_nophysics_seed42",
+          "n_eval": 7489,
+          "positive_frac": 0.4891173839569092,
+          "roc_auc": 0.7752765715389867,
+          "ap": 0.7489959289334558,
+          "train_time_sec": 62.19807767868042,
+          "epochs": 50
+        }
+      ],
+      "physics_mean_auc": 0.7595365187774311,
+      "no_physics_mean_auc": 0.7554530556678781,
+      "delta": 0.004083463109552987
+    },
+    "B2": {
+      "physics": [
+        {
+          "tag": "B2_region0_physics_seed42",
+          "n_eval": 4471,
+          "positive_frac": 0.1847461462020874,
+          "roc_auc": 0.5387882501818472,
+          "ap": 0.2956082839471824,
+          "train_time_sec": 203.7217574119568,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region1_physics_seed42",
+          "n_eval": 4999,
+          "positive_frac": 0.50210040807724,
+          "roc_auc": 0.6731506277021284,
+          "ap": 0.6536867398917037,
+          "train_time_sec": 220.0708019733429,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region2_physics_seed42",
+          "n_eval": 2613,
+          "positive_frac": 0.45579794049263,
+          "roc_auc": 0.48816959356448564,
+          "ap": 0.4265118904197105,
+          "train_time_sec": 250.74583339691162,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region3_physics_seed42",
+          "n_eval": 2401,
+          "positive_frac": 0.666388988494873,
+          "roc_auc": 0.725664013732834,
+          "ap": 0.8233720829037368,
+          "train_time_sec": 242.34570455551147,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region4_physics_seed42",
+          "n_eval": 3912,
+          "positive_frac": 0.26150307059288025,
+          "roc_auc": 0.5885111456913286,
+          "ap": 0.3274202618281513,
+          "train_time_sec": 239.53989839553833,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region5_physics_seed42",
+          "n_eval": 4146,
+          "positive_frac": 0.48504582047462463,
+          "roc_auc": 0.5723446104970671,
+          "ap": 0.5518502470643063,
+          "train_time_sec": 241.1032178401947,
+          "epochs": 50
+        }
+      ],
+      "no_physics": [
+        {
+          "tag": "B2_region0_nophysics_seed42",
+          "n_eval": 4471,
+          "positive_frac": 0.1847461462020874,
+          "roc_auc": 0.5707674448729063,
+          "ap": 0.3159281635465602,
+          "train_time_sec": 87.81460285186768,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region1_nophysics_seed42",
+          "n_eval": 4999,
+          "positive_frac": 0.50210040807724,
+          "roc_auc": 0.6218752951232435,
+          "ap": 0.608276306902893,
+          "train_time_sec": 74.82082557678223,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region2_nophysics_seed42",
+          "n_eval": 2613,
+          "positive_frac": 0.45579794049263,
+          "roc_auc": 0.48867384426801574,
+          "ap": 0.443284657587904,
+          "train_time_sec": 78.57319831848145,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region3_nophysics_seed42",
+          "n_eval": 2401,
+          "positive_frac": 0.666388988494873,
+          "roc_auc": 0.796276529338327,
+          "ap": 0.8663044970113319,
+          "train_time_sec": 70.32910013198853,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region4_nophysics_seed42",
+          "n_eval": 3912,
+          "positive_frac": 0.26150307059288025,
+          "roc_auc": 0.7864153882644487,
+          "ap": 0.5238622963806554,
+          "train_time_sec": 70.8608283996582,
+          "epochs": 50
+        },
+        {
+          "tag": "B2_region5_nophysics_seed42",
+          "n_eval": 4146,
+          "positive_frac": 0.48504582047462463,
+          "roc_auc": 0.5566733085127815,
+          "ap": 0.5267773060081341,
+          "train_time_sec": 66.8053560256958,
+          "epochs": 50
+        }
+      ],
+      "physics_mean_auc": 0.5977713735616152,
+      "no_physics_mean_auc": 0.6367803017299538,
+      "delta": -0.039008928168338564
+    },
+    "B3": {
+      "physics": [
+        {
+          "tag": "B3_leave_years_out_physics_seed42",
+          "n_eval": 856596,
+          "positive_frac": 0.0246382188051939,
+          "roc_auc": 0.8935260281364494,
+          "ap": 0.14011927967015095,
+          "train_time_sec": 277.6274781227112,
+          "epochs": 80
+        }
+      ],
+      "no_physics": [
+        {
+          "tag": "B3_leave_years_out_nophysics_seed42",
+          "n_eval": 856596,
+          "positive_frac": 0.0246382188051939,
+          "roc_auc": 0.9058672821501854,
+          "ap": 0.15624892350712957,
+          "train_time_sec": 114.09227132797241,
+          "epochs": 80
+        }
+      ],
+      "physics_mean_auc": 0.8935260281364494,
+      "no_physics_mean_auc": 0.9058672821501854,
+      "delta": -0.01234125401373598
+    }
+  }
+}

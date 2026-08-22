@@ -1,0 +1,40 @@
+{
+  "multiseed_track_a": {
+    "per_seed": [
+      {
+        "tag": "trackA_multiseed_seed42",
+        "n_eval": 4508,
+        "positive_frac": 0.42058563232421875,
+        "roc_auc": 0.9390525956151743,
+        "ap": 0.921749213988247,
+        "train_time_sec": 306.0379436016083,
+        "epochs": 80
+      },
+      {
+        "tag": "trackA_multiseed_seed43",
+        "n_eval": 4508,
+        "positive_frac": 0.42058563232421875,
+        "roc_auc": 0.941193598516422,
+        "ap": 0.9247467283227768,
+        "train_time_sec": 319.94976687431335,
+        "epochs": 80
+      },
+      {
+        "tag": "trackA_multiseed_seed44",
+        "n_eval": 4508,
+        "positive_frac": 0.42058563232421875,
+        "roc_auc": 0.9369749969307514,
+        "ap": 0.9168815687207934,
+        "train_time_sec": 399.6918785572052,
+        "epochs": 80
+      }
+    ],
+    "mean_auc": 0.9390737303541159,
+    "std_auc": 0.0017223017239628995,
+    "seeds": [
+      42,
+      43,
+      44
+    ]
+  }
+}
