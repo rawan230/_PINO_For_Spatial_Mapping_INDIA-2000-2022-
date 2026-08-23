@@ -40,16 +40,17 @@ contributes measurable, real predictive value under random-split evaluation
 on an identical, now-complete 15-variable feature set. A four-track generalization
 study, however, gives a mixed and instructive picture rather than a uniformly
 favorable one: temporal generalization to unseen years is strong (leave-years-out
-AUC=0.897), but spatial generalization to unseen 2°×2° blocks (AUC=0.754±0.016) and
-especially to entirely unseen regions (leave-one-region-out, AUC=0.599±0.082, one
-region below chance) is weak at the training scale evaluated here, and a direct
+AUC=0.8960), but spatial generalization to unseen 2°×2° blocks (AUC=0.7510±0.0182)
+and especially to entirely unseen regions (leave-one-region-out, AUC=0.6187±0.0680,
+weakest region 0.5387, still above chance) is weak at the training scale evaluated
+here, and a direct
 physics-vs-no-physics comparison found no accuracy advantage from the physics
 constraint under random-split conditions. Five independent methods — term-ablation, spatial fire-point statistics,
 input-channel permutation, marginal-effect response curves, and Biswas et al.'s own
 Fig. 10 Jackknife retraining test, all three of their variable-understanding
 analyses now reproduced — converge on the same finding: elevation dominates the
-trained operator almost completely (a single-covariate model reaches AUC=0.938,
-within 0.002 of the full 7-covariate model), a mechanistic attribution capability no
+trained operator almost completely (a single-covariate model reaches AUC=0.9399,
+within 0.0002 of the full 7-covariate model), a mechanistic attribution capability no
 correlational baseline in this literature offers, but also an explicit
 shortcut-learning caveat this study does not resolve. Six further attempts to close
 the accuracy gap to Random Forest/MaxEnt — evaluation-metric correction,
@@ -383,10 +384,20 @@ collapse, and physical interpretation of the ablation ordering:
 | Track | Description | AUC |
 |---|---|---:|
 | A | Random split (full CDR) | 0.9406 |
-| B1 | 2°×2° spatial block CV, 3 folds | 0.7538 ± 0.0162 |
-| B2 | Leave-one-region-out, 6 regions | 0.5989 ± 0.0815 |
-| B3 | Leave-years-out (new) | 0.8967 |
+| B1 | 2°×2° spatial block CV, 3 folds | 0.7510 ± 0.0182 |
+| B2 | Leave-one-region-out, 6 regions | 0.6187 ± 0.0680 |
+| B3 | Leave-years-out (new) | 0.8960 |
 | — | Data-efficiency: no-physics vs. physics (Track A split) | 0.9463 vs. 0.9406 |
+
+**Re-run with genuine validation-set-driven early stopping (2026-08-23)**: B1, B2,
+and B3 previously trained each fold for a fixed epoch budget with no validation-set
+monitoring at all. They have since been re-run carving real validation pixels/years
+out of each fold's own train portion only (the test fold is never touched), tracking
+best validation AUC per fold, and early-stopping (patience=4) on that metric. The
+table above reflects this corrected protocol (B1 per-fold: 0.7768/0.7395/0.7368; B2
+per-region: 0.5387/0.6805/0.5506/0.7301/0.6157/0.5970; B3 test years
+2000/2008/2009/2015, AP=0.1445); only the data-efficiency row above still reflects
+the pre-standard-protocol checkpoint and remains disclosed as not yet re-run.
 
 Full table, per-fold breakdown, and epoch-budget disclosures:
 `CDR_PINN_Methodology_Section.md` §8.
@@ -466,39 +477,45 @@ each covariate held at its domain-mean constant field ("without $X$"), and one m
 with every *other* covariate held constant ("only $X$") — 14 retrains across the 7
 covariates, plus an "all variables" model retrained at the same reduced 40-epoch
 budget for a fair, apples-to-apples comparison array (the §4.2–4.5 checkpoint used
-80 epochs). Same architecture, seed=42, and 80/20 pixel split as every other
-CDR-PINN experiment in this study.
+80 epochs). Same architecture and seed=42 as every other CDR-PINN experiment in this
+study. **Table below reflects two subsequent corrections**: the 2026-08-21
+`forest_frac` data-leakage fix (only `forest_frac_baseline`, 2001, survives) and a
+2026-08-23 re-run with genuine validation-set-driven early stopping (validation
+carved from each retrain's own train portion, test untouched, patience=4 within the
+40-epoch budget) — superseding the original run this section reported.
 
 | Covariate | Without-*X* AUC | Drop when removed | Only-*X* AUC | Gain alone (vs. chance) |
 |---|---:|---:|---:|---:|
-| **Elevation** | **0.7779** | **−0.1613** | **0.9376** | **+0.4376** |
-| Slope | 0.9394 | −0.0003 | 0.7731 | +0.2731 |
-| Distance to roads | 0.9372 | +0.0019 | 0.7536 | +0.2536 |
-| NDVI (baseline) | 0.9399 | −0.0008 | 0.7048 | +0.2048 |
-| Forest fraction | 0.9392 | −0.0001 | 0.7016 | +0.2016 |
-| Dryness proxy | 0.9393 | −0.0002 | 0.5755 | +0.0755 |
-| NDVI anomaly | 0.9439 | +0.0047 | 0.5374 | +0.0374 |
+| **Elevation** | **0.8027** | **−0.1370** | **0.9399** | **+0.4399** |
+| NDVI (baseline) | 0.9380 | −0.0017 | 0.7177 | +0.2177 |
+| Slope | 0.9365 | −0.0032 | 0.7665 | +0.2665 |
+| Distance to roads | 0.9372 | −0.0025 | 0.7880 | +0.2880 |
+| Forest fraction | 0.9402 | +0.0006 | 0.7233 | +0.2233 |
+| Dryness proxy | 0.9400 | +0.0004 | 0.5903 | +0.0903 |
+| NDVI anomaly | 0.9386 | −0.0010 | 0.5911 | +0.0911 |
 
-All-variables baseline (same 40-epoch budget): AUC=0.9391, matching the 80-epoch
-checkpoint's 0.9406 closely enough to confirm the model is essentially converged well
-before 80 epochs. Two results, both genuinely new relative to §4.4–4.5 because this
-is retraining, not perturbation of a fixed model:
+All-variables baseline (same 40-epoch budget, now with validation-driven early
+stopping): AUC=**0.9397**, closely matching the 80-epoch checkpoint's 0.9406 — the
+model is essentially converged well before 80 epochs. Two results, both genuinely
+new relative to §4.4–4.5 because this is retraining, not perturbation of a fixed
+model:
 
 - **Elevation is the only covariate whose removal meaningfully hurts the model** —
   every other "without-$X$" AUC sits within noise of the full-model baseline
-  (0.9372–0.9439), several even nominally *above* it. This is the **fifth**
-  independent line of evidence for terrain dominance in this study (§4.4's list,
-  extended), and the first obtained via retraining rather than a fixed checkpoint.
+  (0.9365–0.9402), several even nominally *above* it, while elevation's removal
+  costs an order of magnitude more (0.1370). This is the **fifth** independent line
+  of evidence for terrain dominance in this study (§4.4's list, extended), and the
+  first obtained via retraining rather than a fixed checkpoint.
 - **Elevation alone very nearly reproduces the full model**: a model trained on
-  elevation as its *only* informative input reaches AUC=0.9376, within 0.0015 of the
-  7-covariate baseline (0.9391). This sharpens rather than merely repeats the
-  shortcut-learning concern already raised in §4.4 and §5.7 item 10: it is not just
-  that elevation permutation/response-curve tests show large marginal effects, it is
-  that a model given *only* elevation and nothing else learns almost the entire
-  achievable signal at this scale. The other six covariates are not informationally
-  useless in isolation — five of six "only-$X$" models score meaningfully above
-  chance (0.70–0.77 for slope/roads/NDVI/forest-fraction) — they simply add
-  negligible signal on top of what elevation alone already provides.
+  elevation as its *only* informative input reaches AUC=0.9399, within 0.0002 of the
+  7-covariate baseline (0.9397) — elevation alone essentially matches it. This
+  sharpens rather than merely repeats the shortcut-learning concern already raised
+  in §4.4 and §5.7 item 10: it is not just that elevation permutation/response-curve
+  tests show large marginal effects, it is that a model given *only* elevation and
+  nothing else learns almost the entire achievable signal at this scale. The other
+  six covariates are not informationally useless in isolation — all six "only-$X$"
+  models score above chance (0.59–0.79) — they simply add negligible signal on top
+  of what elevation alone already provides.
 
 ### 4.7 Advanced PINN Techniques Tested: Causal Time-Weighting and Curriculum Learning
 
@@ -651,12 +668,12 @@ The hypothesis motivating this whole architectural pivot (§1.4, and Step 8's ow
 prior finding that neural architectures already generalize better than Random Forest
 under spatial CV) was that physics-informed structure should show its clearest
 advantage under distribution shift. The evidence collected here is **mixed, not
-confirmatory**: temporal generalization (Track B3, leave-years-out, AUC=0.897) is
+confirmatory**: temporal generalization (Track B3, leave-years-out, AUC=0.8960) is
 genuinely strong — a real, positive result for exactly the axis this project's
 per-month operator framing was built to enable. Spatial generalization is not:
-Track B1 (spatial block CV, 0.754) and especially Track B2 (leave-one-region-out,
-0.599, one of six regions scoring below chance) show the model does not yet transfer
-well to geographically unseen terrain at this training scale. A direct
+Track B1 (spatial block CV, 0.7510) and especially Track B2 (leave-one-region-out,
+0.6187, weakest of six regions 0.5387, still above chance) show the model does not
+yet transfer well to geographically unseen terrain at this training scale. A direct
 physics-vs-no-physics comparison under identical sparse supervision (§4.3) found
 **no accuracy advantage from the physics constraint** on the random-split evaluation
 — the same comparison run on the harder B1/B2/B3 splits, where the literature
@@ -688,7 +705,7 @@ evaluated on, and does model ranking hold across all of them?* It does not. RF a
 MaxEnt lead on in-distribution accuracy (Track A) but are structurally ineligible
 for Track B3 at all (§3, no year-resolved feature table exists for them to be
 evaluated on); CDR-PINN trails on Track A but is the only model of the three
-capable of being tested on temporal generalization, where it performs well (0.897).
+capable of being tested on temporal generalization, where it performs well (0.8960).
 **No prior study reviewed in §1.2–1.3 reports more than one evaluation axis** — this
 three-model, four-track comparison is itself the paper's methodological
 contribution, independent of any single number: a demonstration that single-split
@@ -768,10 +785,10 @@ missed the features this study's own model relies on most.
     analysis (§4.5), and the Jackknife retraining test (§4.6) — three independent
     methods, the last a genuinely different kind of evidence since it retrains
     rather than perturbs a fixed model — all show near-total sensitivity to
-    elevation alone: removing elevation drops AUC by 0.16 while removing any other
+    elevation alone: removing elevation drops AUC by 0.1370 while removing any other
     single covariate changes nothing measurable, and a model trained on elevation
-    *alone* reaches AUC=0.9376, within 0.0015 of the full 7-covariate model
-    (0.9391). Three independent confirmations make this a
+    *alone* reaches AUC=0.9399, within 0.0002 of the full 7-covariate model
+    (0.9397). Three independent confirmations make this a
     robust *observation*; its *interpretation* remains open (plausibly shortcut
     learning at this training scale), flagged for multi-seed testing (§7.2) rather
     than resolved by any single test.

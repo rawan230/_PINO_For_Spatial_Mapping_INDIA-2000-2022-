@@ -166,9 +166,10 @@ per-covariate-per-physics-head adaptation described below, applied for real:
    covariate's swing is 0.0001–0.008.
 3. **Jackknife** (Biswas Fig. 10 analogue, genuine retraining — 14 runs, leave-one-
    covariate-out and leave-only-one-covariate-in across the 7 covariates, plus a
-   matched-budget baseline): removing elevation drops AUC by 0.1613 (every other
-   removal is noise-level, 0.0001–0.0047); elevation *alone* reaches AUC=0.9376,
-   within 0.0015 of the full 7-covariate model (0.9391).
+   matched-budget baseline; re-run 2026-08-23 with genuine validation-set-driven
+   early stopping, patience=4): removing elevation drops AUC by 0.1370 (every other
+   removal is noise-level, 0.0004–0.0032); elevation *alone* reaches AUC=0.9399,
+   within 0.0002 of the full 7-covariate model (0.9397).
 
 All three converge on the same finding: shuffling slope drops CDR-PINN's AUC by
 ~0% (not 16.7% as in Biswas's own MaxEnt), because CDR-PINN's advection head is
@@ -191,7 +192,7 @@ tested whether each of these three physical ideas actually helps the model predi
 real fire locations it never saw during training. The answer: yes, especially the
 "fire climbs uphill" idea, which produced the single biggest jump in accuracy of
 anything tested. You also tested whether the model could predict fire risk in years
-it had never seen (2000, 2008, 2009, 2015) — it did reasonably well (89.7% accuracy
+it had never seen (2000, 2008, 2009, 2015) — it did reasonably well (89.6% accuracy
 on a 0–100% scale where 50% is a coin flip) — something none of the classical models
 in this study, or in the prior published literature, can even attempt, because they
 don't track time at all.
@@ -224,7 +225,7 @@ argument rather than separate results:
 - **Spatial-block / region-level (Tracks B1/B2)**: tests whether that agreement
   survives when the model must generalize to geography it never saw. This is where
   real operational risk lives — a fire-management agency needs risk maps for regions
-  with sparse or no historical fire data. The current answer (weak, 0.75/0.60) is a
+  with sparse or no historical fire data. The current answer (weak, 0.7510/0.6187) is a
   genuine, actionable finding: **none of the models in this study, including the
   physics-informed one at its current scale, are yet reliable for truly novel
   regions** — a caution worth stating plainly for anyone deploying this kind of

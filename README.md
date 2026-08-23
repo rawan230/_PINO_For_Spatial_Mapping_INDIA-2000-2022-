@@ -20,7 +20,7 @@ is proven, not assumed.
   design, the full paper draft, methodology section, novelty/comparison argument
   against Biswas, Mahato & Joshi (2025), and reviewer-facing Q&A clarifications.
 - **Headline results**: term-ablation AUC 0.602 (diffusion-only) → 0.941 (full CDR);
-  temporal generalization (leave-years-out) AUC 0.897; all three of the reference
+  temporal generalization (leave-years-out) AUC 0.8960; all three of the reference
   paper's variable-understanding analyses (permutation importance, response curves,
   Jackknife) reproduced, all five independent methods converging on near-total
   elevation dominance. Full numbers: `Design_and_Paper/CDR_PINN_Full_Paper_Draft.md`.

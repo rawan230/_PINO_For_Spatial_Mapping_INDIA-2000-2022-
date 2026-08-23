@@ -4,16 +4,21 @@
 > well-posedness, training protocol, term-ablation study, and all four generalization
 > tracks (A/B1/B2/B3) plus a physics-vs-no-physics data-efficiency test are now real,
 > executed, and reported — not a plan any longer. Headline: Track A/B3 (random split,
-> temporal generalization) hold up well (full CDR AUC 0.9406 / 0.8967); Track B1/B2
-> (spatial generalization) are genuinely weak at this training scale (0.75 / 0.60,
-> one B2 region below chance) — reported plainly, not softened, since that is
-> precisely the honest information a reviewer needs. See Section 8 for the complete
-> table and an unresolved, disclosed open question: the data-efficiency test found
-> physics gave **no** advantage on Track A, and the literature's own prediction is
-> that any advantage should show under distribution shift instead — not yet tested.
-> This is a first, modest-scale run (small architecture, 50–80 epochs, single seed),
-> not a final hyperparameter-tuned model — consistent with this project's standing
-> convention of never reporting an untested number as if it were verified.
+> temporal generalization) hold up well (full CDR AUC 0.9406 / 0.8960); Track B1/B2
+> (spatial generalization) are genuinely weak at this training scale (0.7510 / 0.6187,
+> weakest B2 region 0.5387, still above chance) — reported plainly, not softened,
+> since that is precisely the honest information a reviewer needs. See Section 8 for
+> the complete table and an unresolved, disclosed open question: the data-efficiency
+> test found physics gave **no** advantage on Track A, and the literature's own
+> prediction is that any advantage should show under distribution shift instead — not
+> yet tested. This is a first, modest-scale run (small architecture, 50–80 epochs,
+> single seed), not a final hyperparameter-tuned model — consistent with this
+> project's standing convention of never reporting an untested number as if it were
+> verified. **Update (2026-08-23)**: B1/B2/B3 and the Jackknife test (§8.3) were
+> re-run with genuine validation-set-driven early stopping (validation carved from
+> each fold's train portion only, test untouched, checkpoint selected on validation
+> AUC, patience=4) — the numbers above and in §8.2/§8.3 now reflect that corrected
+> protocol, not the earlier fixed-epoch-budget runs.
 
 ---
 
@@ -358,14 +363,22 @@ specifically by the per-month operator framing).
 | Track | Description | Mean AUC | Detail |
 |---|---|---:|---|
 | A | Random 80/20 pixel split | **0.9406** | single split, `n=4,508` |
-| B1 | 2°×2° spatial block CV | 0.7538 ± 0.0162 | 3 folds: 0.7728, 0.7554, 0.7332 |
-| B2 | Leave-one-region-out (6 regions) | 0.5989 ± 0.0815 | range 0.4929–0.7323; one region below chance |
-| B3 | Leave-years-out (2000, 2008, 2009, 2015 held out) | **0.8967** | monthly-resolution eval, `n=856,596`, 2.46% positive |
+| B1 | 2°×2° spatial block CV | 0.7510 ± 0.0182 | 3 folds: 0.7768, 0.7395, 0.7368 |
+| B2 | Leave-one-region-out (6 regions) | 0.6187 ± 0.0680 | 6 regions: 0.5387, 0.6805, 0.5506, 0.7301, 0.6157, 0.5970 |
+| B3 | Leave-years-out (2000, 2008, 2009, 2015 held out) | **0.8960** | AP=0.1445, monthly-resolution eval, `n=856,596`, 2.46% positive |
+
+**Re-run 2026-08-23 with genuine validation-set-driven early stopping**: each B1/B2
+fold and the B3 run now carve validation pixels/years out of their own train portion
+only (test never touched), track best validation AUC, and early-stop with patience=4
+— the same discipline Track A's standard protocol already used, replacing the earlier
+fixed-epoch-budget runs with no validation monitoring at all. The table above reflects
+this corrected protocol.
 
 **This is reported plainly, without softening**: Track A and Track B3 (temporal
 generalization) hold up well; Tracks B1 and B2 (spatial generalization to unseen
-blocks/regions) degrade substantially, and B2 in particular shows real weakness (one
-of six regions scores below the 0.5 chance line). At the current training scale (a
+blocks/regions) degrade substantially. No region now scores below the 0.5 chance
+line — B2's weakest region (0.5387) is only modestly above it. At the current
+training scale (a
 comparatively small architecture, 50–80 epochs, no hyperparameter search), the model
 has **not** demonstrated the spatial-generalization advantage the framework was
 originally motivated to test (§1.4 of the companion paper draft) — the temporal
@@ -490,23 +503,27 @@ retraining: 14 runs (leave-one-covariate-out and leave-only-one-covariate-in acr
 the 7 covariates, covariates held at their domain-mean constant field to keep
 architecture/input shape unchanged), 40 epochs each, plus a matched-budget
 "all-variables" baseline for fair comparison (the §4/§8 checkpoint used 80 epochs).
+**Re-run 2026-08-23** against the corrected `forest_frac_baseline` input (post-
+2026-08-21 leakage fix) and with genuine validation-set-driven early stopping
+(validation carved from each retrain's own train portion, test untouched, patience=4
+within the 40-epoch budget) — the table below supersedes the original 2026-08-21 run.
 
 | Covariate | Without-*X* AUC | Drop | Only-*X* AUC | Gain vs. chance |
 |---|---:|---:|---:|---:|
-| Elevation | 0.7779 | −0.1613 | 0.9376 | +0.4376 |
-| Slope | 0.9394 | −0.0003 | 0.7731 | +0.2731 |
-| Distance to roads | 0.9372 | +0.0019 | 0.7536 | +0.2536 |
-| NDVI | 0.9399 | −0.0008 | 0.7048 | +0.2048 |
-| Forest fraction | 0.9392 | −0.0001 | 0.7016 | +0.2016 |
-| Dryness proxy | 0.9393 | −0.0002 | 0.5755 | +0.0755 |
-| NDVI anomaly | 0.9439 | +0.0047 | 0.5374 | +0.0374 |
+| Elevation | 0.8027 | −0.1370 | 0.9399 | +0.4399 |
+| Slope | 0.9365 | −0.0032 | 0.7665 | +0.2665 |
+| Distance to roads | 0.9372 | −0.0025 | 0.7880 | +0.2880 |
+| NDVI | 0.9380 | −0.0017 | 0.7177 | +0.2177 |
+| Forest fraction | 0.9402 | +0.0006 | 0.7233 | +0.2233 |
+| Dryness proxy | 0.9400 | +0.0004 | 0.5903 | +0.0903 |
+| NDVI anomaly | 0.9386 | −0.0010 | 0.5911 | +0.0911 |
 
-All-variables baseline (40 epochs): AUC=0.9391, closely matching the 80-epoch
+All-variables baseline (40 epochs): AUC=0.9397, closely matching the 80-epoch
 checkpoint's 0.9406 — the model is essentially converged well before 80 epochs.
 Elevation is the only covariate whose removal meaningfully hurts the model; every
-other removal is noise-level. Elevation alone reaches AUC=0.9376, within 0.0015 of
-the full model — five of six other covariates still score meaningfully above
-chance in isolation (0.70–0.77), so they are not informationally useless, they
+other removal is noise-level. Elevation alone reaches AUC=0.9399, within 0.0002 of
+the full model — all six other covariates still score above chance in isolation
+(0.59–0.79), so they are not informationally useless, they
 simply add negligible signal on top of what elevation already provides. This is the
 fifth independent line of evidence for terrain/elevation dominance in this study
 (term-ablation, Step 5a field measurement, permutation importance, response curves,
