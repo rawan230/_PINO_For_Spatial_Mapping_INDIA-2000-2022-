@@ -153,8 +153,8 @@ not aspirational. Full table and discussion: `CDR_PINN_Methodology_Section.md` �
 carved from each fold's/track's own train portion, test untouched, checkpoint
 selected on validation AUC, patience=4) — the numbers below reflect that corrected
 protocol, replacing the earlier fixed-epoch-budget runs. Summary, stated plainly
-rather than favorably: Track A (random split, 0.9406) and Track B3 (leave-years-out,
-0.8960) hold up well; Track B1 (spatial block CV, 0.7510 ± 0.0182) and Track B2
+rather than favorably: Track A (random split, standard protocol, 0.9398) and Track B3
+(leave-years-out, 0.8960) hold up well; Track B1 (spatial block CV, 0.7510 ± 0.0182) and Track B2
 (leave-one-region-out, 0.6187 ± 0.0680, weakest region 0.5387, still above chance)
 are genuinely weak at this training scale. A matched physics-vs-no-physics comparison
 on Track A found **no advantage from the physics constraint** (no-physics

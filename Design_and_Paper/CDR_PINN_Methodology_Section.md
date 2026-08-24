@@ -3,10 +3,17 @@
 > **Status note (2026-08-20, updated twice)**: architecture, governing equation,
 > well-posedness, training protocol, term-ablation study, and all four generalization
 > tracks (A/B1/B2/B3) plus a physics-vs-no-physics data-efficiency test are now real,
-> executed, and reported — not a plan any longer. Headline: Track A/B3 (random split,
-> temporal generalization) hold up well (full CDR AUC 0.9406 / 0.8960); Track B1/B2
-> (spatial generalization) are genuinely weak at this training scale (0.7510 / 0.6187,
-> weakest B2 region 0.5387, still above chance) — reported plainly, not softened,
+> executed, and reported — not a plan any longer. **Updated 2026-08-24: Track A's
+> canonical number is now 0.9398** (`train_standard_protocol.py`'s genuine
+> validation-set-driven run, val AUC 0.9351 — see §8's A7 entry), superseding the
+> 0.9406 figure this note originally cited; 0.9406 still appears below wherever it is
+> the actual comparison baseline a specific diagnostic experiment (data-efficiency
+> test, scale-up regression, LR-schedule/causal-weighting/curriculum-learning tests)
+> was run against at the time, and is not silently rewritten there — see each
+> section's own dating. Headline: Track A/B3 (random split, temporal generalization)
+> hold up well (full CDR AUC 0.9398 / 0.8960); Track B1/B2 (spatial generalization)
+> are genuinely weak at this training scale (0.7510 / 0.6187, weakest B2 region
+> 0.5387, still above chance) — reported plainly, not softened,
 > since that is precisely the honest information a reviewer needs. See Section 8 for
 > the complete table and an unresolved, disclosed open question: the data-efficiency
 > test found physics gave **no** advantage on Track A, and the literature's own
@@ -362,10 +369,16 @@ specifically by the per-month operator framing).
 
 | Track | Description | Mean AUC | Detail |
 |---|---|---:|---|
-| A | Random 80/20 pixel split | **0.9406** | single split, `n=4,508` |
+| A | Random 65/15/20 pixel split, standard protocol | **0.9398** | val AUC 0.9351; `train_standard_protocol.py`, 2026-08-22 |
 | B1 | 2°×2° spatial block CV | 0.7510 ± 0.0182 | 3 folds: 0.7768, 0.7395, 0.7368 |
 | B2 | Leave-one-region-out (6 regions) | 0.6187 ± 0.0680 | 6 regions: 0.5387, 0.6805, 0.5506, 0.7301, 0.6157, 0.5970 |
 | B3 | Leave-years-out (2000, 2008, 2009, 2015 held out) | **0.8960** | AP=0.1445, monthly-resolution eval, `n=856,596`, 2.46% positive |
+
+(Track A's row is the current canonical number, `train_standard_protocol.py`'s
+validated-early-stopping run, 2026-08-22 — superseding this table's original
+0.9406/80-epoch/no-validation entry. B1/B2/B3 are the 2026-08-23
+validation-driven re-run, below. All four rows are now on the same
+validation-set-driven protocol.)
 
 **Re-run 2026-08-23 with genuine validation-set-driven early stopping**: each B1/B2
 fold and the B3 run now carve validation pixels/years out of their own train portion

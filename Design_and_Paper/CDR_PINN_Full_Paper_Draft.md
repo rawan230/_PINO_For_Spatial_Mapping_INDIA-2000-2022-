@@ -383,11 +383,11 @@ collapse, and physical interpretation of the ablation ordering:
 
 | Track | Description | AUC |
 |---|---|---:|
-| A | Random split (full CDR) | 0.9406 |
+| A | Random split, standard protocol (`train_standard_protocol.py`, 2026-08-22) | 0.9398 |
 | B1 | 2°×2° spatial block CV, 3 folds | 0.7510 ± 0.0182 |
 | B2 | Leave-one-region-out, 6 regions | 0.6187 ± 0.0680 |
 | B3 | Leave-years-out (new) | 0.8960 |
-| — | Data-efficiency: no-physics vs. physics (Track A split) | 0.9463 vs. 0.9406 |
+| — | Data-efficiency: no-physics vs. physics (Track A split, pre-standard-protocol 0.9406 checkpoint) | 0.9463 vs. 0.9406 |
 
 **Re-run with genuine validation-set-driven early stopping (2026-08-23)**: B1, B2,
 and B3 previously trained each fold for a fixed epoch budget with no validation-set
