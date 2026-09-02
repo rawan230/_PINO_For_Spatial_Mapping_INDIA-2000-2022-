@@ -115,6 +115,19 @@ MaxEnt contribution), advection ↔ topographic (9.7%), reaction ↔ human-activ
 
 ## 4. Network Architecture
 
+![CDR-PINN architecture: PINO/FNO backbone plus the three physics heads and the four-term adaptive loss](../CDR_PINN_Data/cdr_pinn_architecture_diagram.png)
+
+*The one-step operator $G_\theta(u_t, a_t) \to u_{t+1}$ (top) lifts the 8-channel input (7
+covariates + the current state $u_t$) to 32 channels, passes it through 4 stacked Fourier blocks
+(each a truncated $16\times16$-mode spectral convolution summed with a $1\times1$-conv skip
+connection, GELU-activated), and projects back to a single output channel. In parallel, three
+small physics heads (green, bottom-left) read subsets of the same covariates directly — bypassing
+the operator entirely — to produce the diffusivity $D$, the advection velocity $\mathbf{v}$, and
+the reaction rate $\rho$ that assemble the CDR PDE residual (orange). The total loss (red) combines
+this PDE residual with data, boundary, and initial-condition terms under gradient-norm-balanced
+adaptive weights (Wang, Teng & Perdikaris, 2021). Every number shown is read directly from
+`model.py`/`preprocessing.py`/`train_standard_protocol.py`, not illustrative.*
+
 ### 4.1 Backbone
 
 A Fourier Neural Operator (FNO; Li et al., 2023) rather than a pointwise
