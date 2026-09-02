@@ -1,6 +1,6 @@
 {
   "description": "Full 22-year-trained CDR-PINN, evaluated ONLY on the 2001-2020 slice of its own rollout trajectory, against a fire_ever label recomputed for that same window -- no retraining. Companion to cdr_20yr_2001_2020_subset_result.json for the 22yr-vs-20yr training-data-volume ablation.",
-  "source_checkpoint": "D:\\FOREST FIRE MAPPING(INDIA)\\Physics_Informed_FireRisk_Model\\CDR_PINN_Data/cdr_pinn_full_cdr_standard_protocol.pt",
+  "source_checkpoint": "D:\\FOREST FIRE MAPPING(INDIA)\\Physics_Informed_FireRisk_Model\\CDR_PINN_Data/cdr_pinn_full_cdr_22yr_paired_with_20yr_ablation.pt",
   "n_fire_ever_pixels_window": 8676,
   "val_roc_auc": 0.9337676905864862,
   "val_ap": 0.8954073388577692,

@@ -14,8 +14,9 @@ import numpy as np
 CKPT_DIR = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data"
 OUT_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_22yr_vs_20yr_ablation.png"
 
-with open(f"{CKPT_DIR}/cdr_pinn_full_cdr_standard_protocol_result.json") as f:
-    full_own = json.load(f)
+with open(f"{CKPT_DIR}/cdr_pinn_full_cdr_22yr_paired_with_20yr_ablation_result.json") as f:
+    full_own = json.load(f)  # the fresh, contemporaneous 22yr run paired with the 20yr ablation
+    # (reproduced the original canonical run's numbers exactly: val 0.9351, test 0.9398/0.9223)
 with open(f"{CKPT_DIR}/cdr_pinn_full_model_on_20yr_window_result.json") as f:
     full_on_20yr = json.load(f)
 with open(f"{CKPT_DIR}/cdr_pinn_cdr_20yr_2001_2020_subset_result.json") as f:

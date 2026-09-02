@@ -134,7 +134,10 @@ def main():
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
     balancer = AdaptiveLossBalancer(["data", "pde", "bc", "ic"], update_every=5)
 
-    def rollout_and_score(mask_np):
+    def compute_rollout():
+        """The expensive part (a full sequential 239-month forward pass) -- computed
+        ONCE per validation check and reused to score against every mask (train/val/
+        test), rather than re-rolling-out per mask."""
         model.eval()
         with torch.no_grad():
             u = torch.zeros(1, 1, H, W, device=device)
@@ -145,6 +148,9 @@ def main():
                 u = u_next
             pooled = lse_pool(torch.stack(scores, dim=0), dim=0, tau=5.0)
         model.train()
+        return pooled
+
+    def score_from_pooled(pooled, mask_np):
         m_np = valid_np & mask_np
         y_true = fire_ever_binary_np[m_np]
         y_score = pooled.cpu().numpy()[m_np]
@@ -159,7 +165,10 @@ def main():
         loss = bce[m].mean().item()
         return loss, auc, ap
 
-    train_loss_history, val_loss_history, val_auc_history, val_epochs = [], [], [], []
+    def rollout_and_score(mask_np):
+        return score_from_pooled(compute_rollout(), mask_np)
+
+    train_loss_history, val_loss_history, val_auc_history, train_auc_history, val_epochs = [], [], [], [], []
     best_val_auc, best_state, epochs_without_improvement = -1.0, None, 0
     t_start = time.time()
 
@@ -210,14 +219,17 @@ def main():
             break
 
         if (epoch + 1) % VAL_EVERY == 0 or epoch == N_EPOCHS - 1:
-            val_loss, val_auc, val_ap = rollout_and_score(val_np)
+            pooled = compute_rollout()
+            val_loss, val_auc, val_ap = score_from_pooled(pooled, val_np)
+            _, train_auc, _ = score_from_pooled(pooled, train_np)
             val_loss_history.append(val_loss)
             val_auc_history.append(val_auc)
+            train_auc_history.append(train_auc)
             val_epochs.append(epoch + 1)
             scheduler.step(val_loss)
             print(f"[{CONFIG_NAME} | Epoch {epoch+1}/{N_EPOCHS}] train_loss={epoch_train_loss:.4e} "
-                  f"val_loss={val_loss:.4e} val_auc={val_auc:.4f} lr={optimizer.param_groups[0]['lr']:.2e} "
-                  f"(elapsed {time.time()-t_start:.1f}s)")
+                  f"train_auc={train_auc:.4f} val_loss={val_loss:.4e} val_auc={val_auc:.4f} "
+                  f"lr={optimizer.param_groups[0]['lr']:.2e} (elapsed {time.time()-t_start:.1f}s)")
 
             if val_auc > best_val_auc + 1e-4:
                 best_val_auc = val_auc
@@ -253,11 +265,12 @@ def main():
         ax1.set_title("Loss (optimized quantity) -- 2001-2020 subset")
         ax1.legend(); ax1.grid(alpha=0.3)
 
+        ax2.plot(val_epochs, train_auc_history, label="Train ROC-AUC", color="#1f77b4", marker="s")
         ax2.plot(val_epochs, val_auc_history, label="Validation ROC-AUC", color="#2ca02c", marker="o")
         best_ep = val_epochs[val_auc_history.index(max(val_auc_history))]
         ax2.axvline(best_ep, color="gray", linestyle="--", alpha=0.6, label=f"Selected checkpoint (epoch {best_ep})")
         ax2.set_xlabel("Epoch"); ax2.set_ylabel("ROC-AUC")
-        ax2.set_title("Validation AUC (selection criterion) -- 2001-2020 subset")
+        ax2.set_title("Train vs. Validation AUC\n(overfitting/underfitting diagnostic, 2001-2020 subset)")
         ax2.legend(); ax2.grid(alpha=0.3)
 
         fig.suptitle(f"CDR-PINN training diagnostics: {CONFIG_NAME} (20-year ablation)")
@@ -280,7 +293,7 @@ def main():
         "val_roc_auc": float(val_auc), "val_ap": float(val_ap),
         "test_roc_auc": float(test_auc), "test_ap": float(test_ap),
         "train_loss_history": train_loss_history, "val_loss_history": val_loss_history,
-        "val_auc_history": val_auc_history, "val_epochs": val_epochs,
+        "val_auc_history": val_auc_history, "train_auc_history": train_auc_history, "val_epochs": val_epochs,
     }
     ckpt_path = f"{CKPT_DIR}/cdr_pinn_{CONFIG_NAME}.pt"
     torch.save({"model_state": model.state_dict(), "result": result}, ckpt_path)
