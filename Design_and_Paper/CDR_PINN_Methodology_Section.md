@@ -416,6 +416,24 @@ pixel subsample), a harder learning problem than Track A's setup, compounded by 
 reduced 50-epoch budget used for those multi-fold tracks purely for wall-clock
 reasons.
 
+**Train-vs-validation AUC diagnostic — localizing the B1/B2 failure (added 2026-09-02).**
+`run_validation_tracks.py` was refactored so every validation-checkpoint rollout is scored
+against both the validation mask and the training mask (no extra rollout cost), giving a
+train-AUC trajectory alongside the existing val-AUC one for every B1/B2/B3 fold/region.
+
+![Train-vs-validation AUC trajectories for Tracks B1, B2, and B3](../CDR_PINN_Data/cdr_pinn_tracks_train_val_auc.png)
+
+This resolves an ambiguity the Table 5 numbers alone leave open: is the B1/B2 shortfall
+overfitting, or an out-of-distribution transfer failure? Both B1's three folds and B2's six
+regions finish training with train and validation AUC close together and both high (0.93–0.96,
+gaps of +0.009 to +0.027) — the model is not overfitting the training pixels in any classical
+sense. The entire collapse happens strictly between validation (held-out pixels from the *same*
+spatial blocks/regions used in training) and test (blocks/regions never seen at all): AUC drops
+from ~0.94 to 0.70–0.78 (B1) or 0.54–0.73 (B2) at that boundary alone. Track B3 shows no such
+gap — train (0.896), validation (0.899), and eventual test (0.896) AUC are all close throughout
+training — confirming the distribution-shift problem is specific to the spatial axis, not a
+general property of the operator.
+
 **Data-efficiency test (physics vs. no-physics, identical sparse supervision, Track-A
 split)**: a matched-architecture, matched-data, matched-split comparison — full CDR
 (`use_diffusion/advection/reaction=True`, all physics+data losses) vs. a no-physics
@@ -555,6 +573,18 @@ fifth independent line of evidence for terrain/elevation dominance in this study
 (term-ablation, Step 5a field measurement, permutation importance, response curves,
 and now Jackknife retraining), and completes reproduction of all 3 of Biswas et
 al.'s variable-understanding analyses.
+
+**Train-vs-validation AUC check across all 15 retrains (added 2026-09-02).** Same
+zero-extra-cost tracking as the B1/B2/B3 diagnostic above, applied here to rule out
+differential overfitting across the 15-run sweep as a confound on the importance ranking.
+
+![Jackknife: final train vs. validation AUC and the train-val gap, all 15 retrains](../CDR_PINN_Data/cdr_pinn_jackknife_train_val_auc.png)
+
+Every retrain's train$-$val AUC gap falls in a narrow +0.008 to +0.028 band regardless of which
+covariate is held out or held alone, including the `all` baseline (+0.025) and the
+`without_elevation`/`only_elevation` pair (+0.011/+0.022) that drives the headline AUC swing —
+confirming the table's AUC differences reflect real information content, not some retrains
+being stopped further from convergence than others.
 
 Scripts: `train_causal_curriculum.py`, `jackknife_test.py`, `validation_split_test.py`
 in `Physics_Informed_FireRisk_Model/cdr_pinn/`.

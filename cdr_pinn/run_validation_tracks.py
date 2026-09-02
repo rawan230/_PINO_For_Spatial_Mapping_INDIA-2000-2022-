@@ -153,40 +153,57 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
 
     from losses import lse_pool as _lse_pool
 
-    def rollout_auc(model_, eval_pixel_mask_np, month_mask_np, temporal_per_month=False):
-        """Shared scoring path for validation checks and the final test eval --
-        identical LSE-pooled-over-eval-months logic either way, so a validation
-        AUC and the final test AUC are directly comparable numbers."""
+    def compute_rollout(model_, temporal_per_month=False):
+        """One expensive sequential rollout pass over all months. Returns either
+        a (n_months-1, H, W) per-month sigmoid-score array (temporal_per_month=True,
+        needed because Track B3's train/val/test split is on MONTHS, so every month
+        must be scoreable independently) or a single LSE-pooled (H,W) array
+        (spatial-split tracks, where train/val/test differ only by PIXEL). Scoring
+        this once and slicing it against multiple pixel/month masks (see
+        score_from_rollout below) is what lets a train-AUC be computed at no extra
+        rollout cost beyond the val-AUC that was already being computed here."""
         model_.eval()
         with torch.no_grad():
             u_ = torch.zeros(1, 1, H, W, device=device)
             if temporal_per_month:
-                y_true_list, y_score_list = [], []
+                all_scores = []
                 for ti in range(n_months - 1):
                     u_next_ = model_(u_, covariate_stack(ti))
-                    if month_mask_np[ti]:
-                        s = torch.sigmoid(u_next_.squeeze(0).squeeze(0)).cpu().numpy()
-                        y_score_list.append(s[eval_pixel_mask_np])
-                        y_true_list.append(t_["fire_indicator"][ti + 1].cpu().numpy()[eval_pixel_mask_np])
+                    all_scores.append(torch.sigmoid(u_next_.squeeze(0).squeeze(0)).cpu().numpy())
                     u_ = u_next_
-                y_true, y_score = np.concatenate(y_true_list), np.concatenate(y_score_list)
+                result = np.stack(all_scores, axis=0)
             else:
                 scores = []
                 for ti in range(n_months - 1):
                     u_next_ = model_(u_, covariate_stack(ti))
-                    if month_mask_np[ti]:
-                        scores.append(torch.sigmoid(u_next_.squeeze(0).squeeze(0)))
+                    scores.append(torch.sigmoid(u_next_.squeeze(0).squeeze(0)))
                     u_ = u_next_
                 score_stack = torch.stack(scores, dim=0)
-                pooled = _lse_pool(score_stack, dim=0, tau=5.0).cpu().numpy()
-                y_true = ctx["fire_ever_binary_np"][eval_pixel_mask_np]
-                y_score = pooled[eval_pixel_mask_np]
+                result = _lse_pool(score_stack, dim=0, tau=5.0).cpu().numpy()
         model_.train()
+        return result
+
+    def score_from_rollout(rollout, eval_pixel_mask_np, month_mask_np, temporal_per_month=False):
+        if temporal_per_month:
+            y_true_list, y_score_list = [], []
+            for ti in range(n_months - 1):
+                if month_mask_np[ti]:
+                    y_score_list.append(rollout[ti][eval_pixel_mask_np])
+                    y_true_list.append(t_["fire_indicator"][ti + 1].cpu().numpy()[eval_pixel_mask_np])
+            y_true, y_score = np.concatenate(y_true_list), np.concatenate(y_score_list)
+        else:
+            y_true = ctx["fire_ever_binary_np"][eval_pixel_mask_np]
+            y_score = rollout[eval_pixel_mask_np]
         valid_ = ~np.isnan(y_score) & ~np.isnan(y_true)
         y_true, y_score = y_true[valid_], y_score[valid_]
         if len(np.unique(y_true)) < 2:
             return float("nan"), float("nan")
         return roc_auc_score(y_true, y_score), average_precision_score(y_true, y_score)
+
+    def rollout_auc(model_, eval_pixel_mask_np, month_mask_np, temporal_per_month=False):
+        """Single-shot convenience wrapper (final test eval only -- one rollout, one score)."""
+        rollout = compute_rollout(model_, temporal_per_month)
+        return score_from_rollout(rollout, eval_pixel_mask_np, month_mask_np, temporal_per_month)
 
     model = CDRPINN(n_static_channels=7, width=WIDTH, modes_h=MODES, modes_w=MODES, n_layers=N_LAYERS).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LR)
@@ -201,6 +218,8 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     balancer = AdaptiveLossBalancer(loss_names, update_every=5)
 
     best_val_auc, best_epoch, best_state, epochs_since_improve = -1.0, 0, None, 0
+    train_data_mask_np = train_data_mask.cpu().numpy()
+    train_auc_history, val_auc_history = [], []
 
     t_start = time.time()
     for epoch in range(epochs):
@@ -270,10 +289,15 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
         # fix: every track previously trained for a fixed epoch budget with zero
         # validation monitoring, unlike train_standard_protocol.py's Track A). ----
         if (epoch + 1) % val_every == 0 or epoch == epochs - 1:
-            val_auc, val_ap = rollout_auc(model, val_pixel_mask_for_eval, val_month_mask,
-                                           temporal_per_month=is_temporal_split)
+            rollout = compute_rollout(model, temporal_per_month=is_temporal_split)
+            val_auc, val_ap = score_from_rollout(rollout, val_pixel_mask_for_eval, val_month_mask,
+                                                  temporal_per_month=is_temporal_split)
+            train_auc, _ = score_from_rollout(rollout, train_data_mask_np, train_month_mask,
+                                               temporal_per_month=is_temporal_split)
+            train_auc_history.append([epoch + 1, train_auc])
+            val_auc_history.append([epoch + 1, val_auc])
             improved = (not np.isnan(val_auc)) and (val_auc > best_val_auc)
-            print(f"  [{tag}] epoch {epoch+1}/{epochs}  val_AUC={val_auc:.4f}"
+            print(f"  [{tag}] epoch {epoch+1}/{epochs}  train_AUC={train_auc:.4f}  val_AUC={val_auc:.4f}"
                   + ("  <- best" if improved else ""))
             if improved:
                 best_val_auc, best_epoch = val_auc, epoch + 1
@@ -296,7 +320,8 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     auc, ap = rollout_auc(model, eval_pixel_mask, eval_month_mask, temporal_per_month=is_temporal_split)
 
     result = {"tag": tag, "roc_auc": float(auc), "ap": float(ap), "train_time_sec": train_time,
-              "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc)}
+              "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc),
+              "train_auc_history": train_auc_history, "val_auc_history": val_auc_history}
     print(f"[{tag}] AUC={result['roc_auc']:.4f} AP={result['ap']:.4f}  "
           f"(best val_AUC={best_val_auc:.4f} @ epoch {best_epoch}, stopped @ {epoch+1}/{epochs}, {train_time:.1f}s)")
     return result

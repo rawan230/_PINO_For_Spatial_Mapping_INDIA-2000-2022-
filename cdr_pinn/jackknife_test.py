@@ -80,9 +80,11 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
             "dist_roads": cov_value("dist_roads", ti).unsqueeze(0),
         }
 
-    def rollout_auc(model_, eval_mask_np):
-        """Same LSE-pooled scoring path used for validation checks and the final
-        test eval -- shared with run_validation_tracks.py's identical fix."""
+    def compute_rollout(model_):
+        """One expensive sequential rollout pass -- scored against both the train
+        mask and the val mask below (score_from_rollout) so a train-AUC comes at
+        no extra rollout cost, same pattern as run_validation_tracks.py /
+        train_standard_protocol.py."""
         model_.eval()
         with torch.no_grad():
             u_ = torch.zeros(1, 1, H, W, device=device)
@@ -93,6 +95,9 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
                 u_ = u_next_
             pooled_ = lse_pool(torch.stack(scores, dim=0), dim=0, tau=5.0).cpu().numpy()
         model_.train()
+        return pooled_
+
+    def score_from_rollout(pooled_, eval_mask_np):
         y_true_ = fire_ever_binary_np[eval_mask_np]
         y_score_ = pooled_[eval_mask_np]
         ok_ = ~np.isnan(y_score_) & ~np.isnan(y_true_)
@@ -101,12 +106,18 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
             return float("nan"), float("nan")
         return roc_auc_score(y_true_, y_score_), average_precision_score(y_true_, y_score_)
 
+    def rollout_auc(model_, eval_mask_np):
+        """Single-shot convenience wrapper (final test eval only)."""
+        return score_from_rollout(compute_rollout(model_), eval_mask_np)
+
     model = CDRPINN(n_static_channels=7, width=WIDTH, modes_h=MODES, modes_w=MODES, n_layers=N_LAYERS).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LR)
     balancer = AdaptiveLossBalancer(["data", "pde", "bc", "ic"], update_every=5)
 
     best_val_auc, best_epoch, best_state, epochs_since_improve = -1.0, 0, None, 0
     val_eval_mask = valid_np & val_np
+    train_data_mask_np = train_data_mask.cpu().numpy()
+    train_auc_history, val_auc_history = [], []
 
     t_start = time.time()
     for epoch in range(epochs):
@@ -150,7 +161,11 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
         # Validation-based checkpoint selection + early stopping -- previously
         # missing (fixed epoch budget only), same fix as run_validation_tracks.py.
         if (epoch + 1) % val_every == 0 or epoch == epochs - 1:
-            val_auc, _ = rollout_auc(model, val_eval_mask)
+            rollout = compute_rollout(model)
+            val_auc, _ = score_from_rollout(rollout, val_eval_mask)
+            train_auc, _ = score_from_rollout(rollout, train_data_mask_np)
+            train_auc_history.append([epoch + 1, train_auc])
+            val_auc_history.append([epoch + 1, val_auc])
             improved = (not np.isnan(val_auc)) and (val_auc > best_val_auc)
             if improved:
                 best_val_auc, best_epoch = val_auc, epoch + 1
@@ -168,7 +183,8 @@ def train_one(covariate_mode, held_out_or_only, epochs, device, tens, means, val
     eval_mask = valid_np & test_np
     auc, ap = rollout_auc(model, eval_mask)
     return {"auc": auc, "ap": ap, "train_time_sec": train_time,
-            "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc)}
+            "epochs_run": epoch + 1, "best_epoch": best_epoch, "best_val_auc": float(best_val_auc),
+            "train_auc_history": train_auc_history, "val_auc_history": val_auc_history}
 
 
 def main():
