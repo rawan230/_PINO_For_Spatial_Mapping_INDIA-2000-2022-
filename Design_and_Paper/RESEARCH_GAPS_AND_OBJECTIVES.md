@@ -9,30 +9,40 @@
 
 ---
 
-## 1. Summary Table: Gap → Objective → Evidence
+## 1. Research Objectives of This Study
 
-| # | Research gap | Key evidence (tier) | What Biswas et al. [R1] did | Objective | How this study fills it (updated result) |
-|---|---|---|---|---|---|
-| G1 | Susceptibility is modelled as static per-pixel classification with no governing equation | R1, R2, R3, R4, R5, R6, R7 (Q1) | MaxEnt density estimation over 15 static rasters | **O1** | CDR equation derived from a susceptibility balance law, with each term tied to one predictor group |
-| G2 | No explicit temporal state, so nothing can be tested on unseen years | R8, R9, R10, R11 (Q1) | Predictors aggregated over 2001–2020; one probability map | **O3, O4** | 266-month latent field; unseen-year Track B3 AUC **0.8960** |
-| G3 | Physics-informed ML has not reached wildfire *susceptibility*, and nothing exists for India | R12, R13, R14, R15, R16, R17 (Q1) | Purely data-driven | **O3** | First physics-informed neural *operator* for susceptibility and first physics-informed treatment for India |
-| G4 | Neural operators are tested on synthetic PDEs on flat grids, not on observational archives | R18, R19, R20, R21 (A*/Q1) | — | **O3** | FNO trained on a 22-year MODIS archive; exact Laplace–Beltrami operator removes a 24.5% metric distortion |
-| G5 | Learned-physics models give no well-posedness guarantee, and coefficient signs are left to the loss | R22, R23, R24, R14 (A*/Q1) | Not applicable | **O2** | Global well-posedness theorem with constants from measured data; coefficient signs fixed by architecture |
-| G6 | Interpretability is post-hoc and correlational (SHAP, permutation, Jackknife) | R25, R26, R27, R1 (Q1) | Percent contribution, permutation importance, Jackknife; R1 itself notes contributions are path-dependent | **O3** | Term ablation falsifies each mechanism: 0.6017 → 0.9239 → 0.9397 AUC |
-| G7 | Evaluation uses one random split, which spatial autocorrelation inflates | R28, R29, R30, R31 (Q1) | 70/30 random split, AUC 0.894 train / 0.879 test | **O4** | Four tracks (random, spatial block, leave-region-out, leave-years-out) with the same blocking applied to the baselines |
-| G8 | National maps are coarse; predictors enter as whole-period snapshots; land cover is only a filter | R1, R32, R33, R34 (Q1) | 0.25° grid; LC used only to mask fire points | Data foundation (supports **O3**) | 1 km grid (25× finer); 9 NDVI + LST/FLDAS decompositions with FDR control; 22-class LC holds **15.3%** of RF importance |
-| G9 | Fire points are not independently validated and data leakage is not audited | R35, R36, R29 (Q1) | Fire-point extraction not independently validated | Data foundation (supports **O4**) | Burned-area check r = 0.915 / ρ = 0.835; leakage audit removed the top-3 features (importance ≈ 0.40) |
-| G10 | The claimed physics benefit is asserted rather than tested against tuned baselines under shift | R13, R37, R22, R21 (A*/Q1) | Single model, no baseline comparison | **O4** | Physics vs. no physics on all 4 tracks (negative on 3 of 4, reported in full); tuned RF 0.9704 and MaxEnt 0.9598 reported as stronger in-distribution |
+**Aim.** To replace static, classifier-based forest-fire susceptibility mapping for India with a susceptibility field governed by a derived, provably well-posed physical equation. The field should be resolved in time, decomposable into named mechanisms, and evaluated honestly against the reference study and tuned classical baselines.
 
-**Research objectives (as stated in the manuscript, §I-E):**
-- **O1 Formulate:** derive a CDR equation in which each term is a named fire-behaviour mechanism and maps to one of the reference study's predictor groups.
-- **O2 Guarantee:** prove the initial-boundary value problem has a unique global-in-time weak solution over the full record, with constants taken from measured data ranges.
-- **O3 Solve and test:** train a physics-informed neural operator on 541,545 forest-filtered MODIS detections and measure each mechanism's contribution by term ablation.
-- **O4 Position honestly:** evaluate on four generalisation tracks, apply the same spatial blocking to tuned classical baselines, and test whether the physics constraint helps under distribution shift.
+To achieve this aim, the study has five research objectives. O1–O4 are the objectives stated in the manuscript (§I-E). O5 is the data objective behind them; it appears in the manuscript's contributions paragraph but not yet as a numbered objective.
+
+| Objective | Statement | Gaps addressed |
+|---|---|---|
+| **O1 Formulate** | To derive, from a susceptibility balance law, a convection–diffusion–reaction (CDR) equation in which each term (diffusion, advection, reaction) represents a named fire-behaviour mechanism and absorbs one of the reference study's predictor groups, with an explicit reason stated for every term. | G1 |
+| **O2 Guarantee** | To prove that the resulting initial–boundary value problem has a unique global-in-time weak solution over the full 266-month record, with every constant computed from measured data ranges, and to guarantee the physically required coefficient signs by architecture rather than by loss penalty. | G5 |
+| **O3 Solve and test** | To train a physics-informed Fourier neural operator, with exact spherical differential operators, on 22 years (2000–2022) of monthly forest-filtered MODIS fire observations, and to measure each mechanism's own contribution by term ablation. | G2, G3, G4, G6 |
+| **O4 Evaluate honestly** | To evaluate the model on four generalisation tracks (random, spatial-block, leave-region-out and leave-years-out), to apply the same spatial blocking to tuned Random Forest and MaxEnt baselines, and to test whether the physics constraint improves robustness under distribution shift, reporting the answer whichever way it falls. | G2, G7, G10 |
+| **O5 Build and validate the data** | To build a 1 km, month-resolved, leakage-audited national predictor stack that keeps parity with the reference study's 15 conditioning variables, and to validate the extracted forest-fire points against an independent burned-area product. | G8, G9 |
 
 ---
 
-## 2. Detailed Gap Statements
+## 2. Summary Table: Gap → Objective → Evidence
+
+| # | Research gap | Key evidence (tier) | What Biswas et al. [R1] did | Research objective that fills it | Updated result |
+|---|---|---|---|---|---|
+| G1 | Susceptibility is modelled as static per-pixel classification with no governing equation | R1, R2, R3, R4, R5, R6, R7 (Q1) | MaxEnt density estimation over 15 static rasters | **O1:** To derive a CDR susceptibility equation whose terms are named mechanisms | CDR equation derived from a balance law; each term maps to one predictor group; Moran's I = 0.8322 supports the diffusion term |
+| G2 | No explicit temporal state, so nothing can be tested on unseen years | R8, R9, R10, R11 (Q1) | Predictors aggregated over 2001–2020; one probability map | **O3 + O4:** To model susceptibility as a monthly field over 266 months and test it on held-out years | Leave-years-out Track B3 AUC **0.8960**; the classical models cannot be evaluated on this axis |
+| G3 | Physics-informed ML has not reached wildfire *susceptibility*, and nothing exists for India | R12, R13, R14, R15, R16, R17 (Q1) | Purely data-driven | **O3:** To build the first physics-informed neural operator for fire susceptibility, applied to India | First PINO for susceptibility and first physics-informed treatment for India (541,545 fire points) |
+| G4 | Neural operators are tested on synthetic PDEs on flat grids, not on observational archives | R18, R19, R20, R21 (A*/Q1) | — | **O3:** To train a neural operator on a real 22-year archive using exact spherical derivatives | FNO with 1,054,613 parameters; Laplace–Beltrami operator removes a 24.5% metric distortion |
+| G5 | Learned-physics models give no well-posedness guarantee, and coefficient signs are left to the loss | R22, R23, R24, R14 (A*/Q1) | Not applicable | **O2:** To prove well-posedness from measured constants and fix coefficient signs by architecture | Global well-posedness theorem (e.g. slope ≤ 77.31°); D > 0, ρ ≥ 0, **v** upslope by construction |
+| G6 | Interpretability is post-hoc and correlational (SHAP, permutation, Jackknife) | R25, R26, R27, R1 (Q1) | Percent contribution, permutation importance, Jackknife; R1 itself notes contributions are path-dependent | **O3:** To test each mechanism by term ablation instead of post-hoc ranking | Ablation AUC 0.6017 → 0.9239 → **0.9397** |
+| G7 | Evaluation uses one random split, which spatial autocorrelation inflates | R28, R29, R30, R31 (Q1) | 70/30 random split, AUC 0.894 train / 0.879 test | **O4:** To evaluate on four tracks with identical spatial blocking for all models | Spatial block: RF 0.9498, MaxEnt 0.9465, CDR-PINO 0.7510; leave-region-out 0.6187 |
+| G8 | National maps are coarse; predictors enter as whole-period snapshots; land cover is only a filter | R1, R32, R33, R34 (Q1) | 0.25° grid; land cover used only to mask fire points | **O5:** To build a 1 km, month-resolved predictor stack with land cover as a predictor | 25× finer grid; temporal decompositions with FDR control; 22-class land cover carries **15.3%** of RF importance |
+| G9 | Fire points are not independently validated and data leakage is not audited | R35, R36, R37 (Q1) | Fire-point extraction not independently validated | **O5:** To validate fire points independently and audit the stack for leakage | r = 0.915 / ρ = 0.835 against burned area; leakage audit removed the top-3 features (≈ 0.40 importance) |
+| G10 | The claimed physics benefit is asserted rather than tested against tuned baselines under shift | R13, R38, R22, R21 (A*/Q1) | Single model, no baseline comparison | **O4:** To test physics vs. no physics on every track, against tuned baselines | Physics effect negative on 3 of 4 tracks at 2.50× training cost; tuned RF 0.9704 and MaxEnt 0.9598 beat CDR-PINO's 0.9398 in-distribution |
+
+---
+
+## 3. Detailed Gap Statements
 
 ### G1. Susceptibility is modelled as classification, not as a governed physical field
 
@@ -40,7 +50,7 @@
 
 **In Biswas et al. [R1].** MaxEnt estimates the relative likelihood of fire per pixel from 15 predictors, and each pixel is treated independently.
 
-**Objective → O1.** Derive susceptibility as the solution of a PDE rather than as a classifier output.
+**Research objective (O1).** To derive susceptibility as the solution of a convection–diffusion–reaction equation, obtained from a susceptibility balance law, in which each term is a named fire-behaviour mechanism that absorbs one of the reference study's predictor groups.
 
 **How it is filled.** The equation is built up from an integral balance, through a constitutive flux law (Fickian fuel term plus terrain transport) and a Fisher–KPP production term, to the operational CDR form ∂u/∂t = D∇²u − **v**·∇u + ρσ(u)(1−σ(u)). Each term takes over one of R1's predictor groups:
 - **Diffusion:** biophysical and climatic group.
@@ -57,7 +67,7 @@ The diffusion term has direct data support: global Moran's I = **0.8322** (z = 7
 
 **In Biswas et al. [R1].** Conditioning factors cover 2001–2020 and are used as whole-period layers. The output is a single probability map, so temporal generalisation cannot be evaluated.
 
-**Objective → O3, O4.** Carry an explicit monthly state variable across the full record, and evaluate on held-out years.
+**Research objective (O3 + O4).** To represent susceptibility as a latent field that evolves monthly across the full 266-month record (O3), and to test it on years withheld from training (O4, Track B3).
 
 **How it is filled.**
 - The latent field u(x,y,t) evolves over **266 months** (Nov 2000–Dec 2022).
@@ -76,7 +86,7 @@ The closest hazard analogue is a pointwise PINN for landslide susceptibility [R1
 
 **In Biswas et al. [R1].** Purely data-driven, with no physical constraint.
 
-**Objective → O3.**
+**Research objective (O3).** To develop and train the first physics-informed neural operator for wildfire susceptibility, and to apply it to India for the first time.
 
 **How it is filled.** This is the first physics-informed neural *operator* for wildfire susceptibility and the first physics-informed treatment of the problem for India. The operator is trained on **541,545** forest-filtered MODIS C6.1 detections (reduced from 2,804,373 raw).
 
@@ -86,7 +96,7 @@ The closest hazard analogue is a pointwise PINN for landslide susceptibility [R1
 
 **Gap.** Fourier and DeepONet operators [R18, R19, R20] learn maps between function spaces, but the standard benchmarks (PDEBench, NeurIPS A* [R21]) are made up entirely of synthetic PDE families. Environmental uses such as climate super-resolution exist, but they do not learn a governing equation from a multi-decade *observational* archive. Most also apply planar derivatives to latitude–longitude grids.
 
-**Objective → O3.**
+**Research objective (O3).** To train a neural operator on a real, multi-decade observational archive rather than a synthetic PDE family, with spatial derivatives evaluated exactly on the sphere.
 
 **How it is filled.**
 - An FNO backbone (1,054,613 parameters) is amortised across 265 monthly instances of a real 22-year archive.
@@ -98,7 +108,7 @@ The closest hazard analogue is a pointwise PINN for landslide susceptibility [R1
 
 **Gap.** PINN training has documented failure modes (A* [R22]; Q1 [R23, R24]). A soft PDE penalty does not guarantee that the learned coefficients are physically admissible, for example non-negative diffusivity or upslope-directed transport. The fire PINN studies [R14, R15] also do not prove existence and uniqueness for the equation they fit.
 
-**Objective → O2.**
+**Research objective (O2).** To prove that the governing equation has a unique global-in-time weak solution over the full record, with every constant computed from measured data, and to guarantee the physically required coefficient signs by architecture.
 
 **How it is filled.**
 - **Theorem (global well-posedness):** the problem has a unique global-in-time weak solution over the full 266-month record. The constants are computed from measured data ranges, including India's maximum slope of **77.31°**.
@@ -113,7 +123,7 @@ The closest hazard analogue is a pointwise PINN for landslide susceptibility [R1
 
 **Gap.** Susceptibility studies explain models after training, using SHAP [R25, R26, R27], permutation importance or Jackknife tests. These show that a variable *correlates* with the output inside an already-fitted model. They cannot test whether a physical *mechanism* is needed. Biswas et al. themselves note that MaxEnt percent contributions "can vary depending on the specific algorithmic path" [R1].
 
-**Objective → O3.**
+**Research objective (O3).** To measure each mechanism's own contribution by term ablation, so that every term of the equation can be falsified directly rather than ranked after training.
 
 **How it is filled.** Each mechanism is removed in turn and the model retrained (term ablation). This is a falsification test, not a ranking:
 
@@ -133,7 +143,7 @@ Six independent analyses agree that elevation/terrain dominates. These are the a
 
 **In Biswas et al. [R1].** 70/30 random split of occurrences, AUC **0.894** (train) and **0.879** (test).
 
-**Objective → O4.**
+**Research objective (O4).** To evaluate the model on four generalisation tracks (random, spatial-block, leave-region-out and leave-years-out), applying the same spatial blocking to tuned Random Forest and MaxEnt baselines.
 
 **How it is filled.** Four tracks, with identical spatial blocking applied to the baselines:
 
@@ -154,7 +164,7 @@ A train-vs-validation diagnostic shows the B1/B2 drop is an out-of-distribution 
 
 **In Biswas et al. [R1].** Conditioning rasters at **0.25° × 0.25°**. ESA-CCI land cover is used only to confine fire points to forest.
 
-**Objective.** This is a data-foundation contribution that supports O3. The manuscript lists it among the contributions, not as a numbered objective.
+**Research objective (O5).** To build a 1 km, month-resolved national predictor stack that keeps parity with the reference study's 15 conditioning variables, decomposes each into climatology, anomaly and trend, and admits 22-class land cover as a predictor.
 
 **How it is filled.**
 - Common grid of **3,641 × 3,504** pixels at about 1 km: **4,161,009** in-India pixels, a **25×** linear refinement over R1.
@@ -169,7 +179,7 @@ A train-vs-validation diagnostic shows the B1/B2 drop is an out-of-distribution 
 
 **In Biswas et al. [R1].** Burned area is described, but the fire-point extraction is not validated against it quantitatively.
 
-**Objective.** This is a data-foundation contribution that supports O4 (honest evaluation).
+**Research objective (O5).** To validate the extracted forest-fire points against an independent burned-area product, and to audit the predictor stack for label leakage before any model is trained.
 
 **How it is filled.**
 - Against MCD64A1.061 burned area: **r = 0.915, ρ = 0.835** (p < 0.0001, n = 23). The forest-masked re-derivation gives r = 0.9044.
@@ -184,7 +194,7 @@ A train-vs-validation diagnostic shows the B1/B2 drop is an out-of-distribution 
 
 **In Biswas et al. [R1].** A single MaxEnt model with no comparison model.
 
-**Objective → O4.**
+**Research objective (O4).** To test whether the physics constraint improves robustness under distribution shift, through a matched physics-vs-no-physics comparison on all four tracks against tuned classical baselines, and to report the answer whichever way it falls.
 
 **How it is filled.**
 - **Tuned baselines:** RF (depth 25, leaf 3) reaches 0.9704 AUC; MaxEnt (β = 4.0, replicating R1's configuration) reaches 0.9598. Both beat the operator in-distribution (by about 0.02 AUC) and under spatial blocking (by about 0.20 AUC). This is reported plainly.
@@ -201,22 +211,28 @@ A train-vs-validation diagnostic shows the B1/B2 drop is an out-of-distribution 
 
 ---
 
-## 3. Gap → Objective Coverage
+## 4. Gap → Objective Coverage Matrix
 
-| Objective | Gaps addressed |
-|---|---|
-| O1 Formulate | G1 |
-| O2 Guarantee | G5 |
-| O3 Solve and test | G2, G3, G4, G6 (G8 as supporting data) |
-| O4 Position honestly | G2, G7, G10 (G9 as supporting data) |
+| Gap | O1 Formulate | O2 Guarantee | O3 Solve and test | O4 Evaluate honestly | O5 Build and validate data |
+|---|:-:|:-:|:-:|:-:|:-:|
+| G1 Static classification, no governing equation | ✔ | | | | |
+| G2 No temporal state / no unseen-year test | | | ✔ | ✔ | |
+| G3 No physics-informed susceptibility model | | | ✔ | | |
+| G4 Operators on synthetic, flat-grid problems | | | ✔ | | |
+| G5 No well-posedness / unconstrained signs | | ✔ | | | |
+| G6 Post-hoc, correlational interpretability | | | ✔ | | |
+| G7 Single random-split evaluation | | | | ✔ | |
+| G8 Coarse, snapshot predictors | | | | | ✔ |
+| G9 Unvalidated labels / unaudited leakage | | | | | ✔ |
+| G10 Physics benefit untested | | | | ✔ | |
 
-*Optional:* if you want all ten gaps tied to a numbered objective, add **O0, "Build"**: construct a 1 km, month-resolved, leakage-audited and independently validated national predictor stack that keeps parity with the reference study's 15 predictor groups. This would cover G8 and G9 and needs a one-sentence edit to §I-E of the manuscript.
+Every gap is addressed by at least one objective, and every objective addresses at least one gap. **O5 is new:** add it to §I-E of `CDR_PINO_TGRS.tex` (one sentence) so the manuscript's objectives match this document.
 
 > **Consistency flag (still open in the manuscript):** the contributions paragraph and §II-D of `CDR_PINO_TGRS.tex` list "specific humidity" as an added feature. The pipeline actually uses **derived relative humidity** (Magnus formula). Any G8 text copied into the paper should say "relative humidity (derived)".
 
 ---
 
-## 4. References (2010–2026)
+## 5. References (2010–2026)
 
 | ID | Reference | Tier |
 |---|---|---|
