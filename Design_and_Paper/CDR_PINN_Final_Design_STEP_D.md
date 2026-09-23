@@ -56,18 +56,28 @@ in some finite `[z_min,z_max]` — **the identical argument already used for the
 1D case**, extended to 2D with no new proof technique required. `D(x,y,t)` remains
 bounded away from `0` and `∞` everywhere, exactly as before.
 
-**Implementation note**: use a single recent snapshot (`forest_frac_recent`, Step
-6's 2020 estimate) as a static input rather than interpolating across the three
-available snapshot years (2001/2020/2022) — the measured drift (10.2%→10.5%→10.7%
-national mean) is small enough that this is a defensible simplification, stated
-explicitly rather than silently assumed.
+**Implementation note, corrected 2026-08-21**: the original plan here (use
+`forest_frac_recent`, Step 6's 2020 estimate, as a static input) was implemented and
+then found to carry a real data-leakage risk — `forest_frac_recent` (2020) and
+`forest_frac_current` (2022) both fall inside the fire label's own 2000–2022 pooled
+time window, and published literature on post-fire land-cover reclassification
+(burned forest commonly reclassified to shrubland/agriculture in later LULC
+products) makes reverse causality a genuine concern, not a formality. Step 6 now
+drops both, keeping only `forest_frac_baseline` (2001, the year closest to a true
+pre-fire condition given the label isn't year-resolved) — `D_net`'s input changed
+accordingly (`add_missing_static_fields.py`), and the term-ablation/Jackknife/
+permutation-importance results were all re-verified against the corrected input
+(`forest_frac`'s own measured contribution changed only trivially, confirming the
+fix was a correctness improvement, not one with large practical stakes for this
+specific diagnostic).
 
-**Reviewer-facing justification**: `forest_frac_recent/current/baseline` are Step
-7's own **top-3 Gini-importance features** — this isn't an untested addition, it's
-promoting the variable this project's own results already flagged as most
-informative into the physics term that most naturally fits it (fuel
-type/continuity, which raw NDVI greenness alone conflates across genuinely
-different land-cover types).
+**Reviewer-facing justification, updated**: `forest_frac_baseline` is Step 7's own
+**top Gini-importance feature** (0.2066 in the tuned, leakage-corrected model,
+2026-08-22) — this isn't an untested addition, it's promoting the variable this
+project's own results already flagged as most informative into the physics term
+that most naturally fits it (fuel type/continuity, which raw NDVI greenness alone
+conflates across genuinely different land-cover types), using the one snapshot year
+that doesn't carry the leakage risk the other two did.
 
 ---
 

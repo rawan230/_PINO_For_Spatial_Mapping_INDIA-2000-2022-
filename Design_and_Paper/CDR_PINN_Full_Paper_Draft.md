@@ -15,11 +15,13 @@
 
 ## Abstract
 
-*(Drafted to the complete Track A/B1/B2/B3 evidence plus Jackknife retraining,
-validation-honest re-selection, and causal-weighting/curriculum-learning tests,
-2026-08-21 — reported honestly, including the tracks that did not go as
-hypothesized, since that is the accurate current state of the work.)* Forest fires
-in India have grown in frequency and
+*(Drafted to the complete Track A/B1/B2/B3 evidence, the forest-fraction leakage fix
+and its full re-verification, the validated standard train/val/test protocol
+(regularization search, adaptive LR, AUC-driven early stopping), and RF/MaxEnt's own
+new spatial-block CV, 2026-08-22 — reported honestly, including the finding that
+turned out unfavorable to this study's own headline model, since that is the
+accurate current state of the work.)* Forest fires in India have grown in frequency
+and
 severity, and existing susceptibility-mapping approaches — including the most recent
 national-scale study, Biswas, Mahato & Joshi (2025) — rely on presence-background
 statistical models (MaxEnt) applied to static, independently-modeled predictor
@@ -35,36 +37,48 @@ reaction — mapping directly onto the four non-trivial predictor groups identif
 the reference MaxEnt study, and we prove global-in-time well-posedness of the
 governing equation. A term-ablation study demonstrates that each mechanism
 contributes measurable, real predictive value under random-split evaluation
-(held-out ROC-AUC: diffusion-only 0.602, +advection 0.924, full CDR 0.941), within
-0.02–0.03 AUC of classical Random Forest (0.968) and MaxEnt (0.960) baselines trained
-on an identical, now-complete 15-variable feature set. A four-track generalization
-study, however, gives a mixed and instructive picture rather than a uniformly
-favorable one: temporal generalization to unseen years is strong (leave-years-out
-AUC=0.8960), but spatial generalization to unseen 2°×2° blocks (AUC=0.7510±0.0182)
-and especially to entirely unseen regions (leave-one-region-out, AUC=0.6187±0.0680,
-weakest region 0.5387, still above chance) is weak at the training scale evaluated
-here, and a direct
-physics-vs-no-physics comparison found no accuracy advantage from the physics
-constraint under random-split conditions. Five independent methods — term-ablation, spatial fire-point statistics,
-input-channel permutation, marginal-effect response curves, and Biswas et al.'s own
-Fig. 10 Jackknife retraining test, all three of their variable-understanding
-analyses now reproduced — converge on the same finding: elevation dominates the
-trained operator almost completely (a single-covariate model reaches AUC=0.9399,
-within 0.0002 of the full 7-covariate model), a mechanistic attribution capability no
-correlational baseline in this literature offers, but also an explicit
-shortcut-learning caveat this study does not resolve. Six further attempts to close
-the accuracy gap to Random Forest/MaxEnt — evaluation-metric correction,
-capacity scale-up, an untuned learning-rate schedule, causal time-weighting, staged
-curriculum learning, and an honest validation-selected re-test — all land within a
-narrow 0.93–0.94 AUC band except scale-up (robustly worse across two independent
-splits), evidence against an under-optimized model and consistent instead with a
-representation ceiling. We report these results without softening, situate them
-against the literature's own prediction that physics-informed advantages should
-appear specifically under distribution shift (not yet confirmed here), and identify
-the physics-informed neural operator's demonstrated advantage as currently
-mechanistic and falsifiable rather than raw-accuracy-superior — a genuine, if
-partial, contribution against a literature in which no comparable ablation or
-mechanistic account exists.
+(held-out ROC-AUC: diffusion-only 0.602, +advection 0.924, full CDR 0.940 under a
+validated train/validation/test protocol adopted after this draft's earlier
+0.941 figure), a real gap below classical Random Forest (0.970, hyperparameter-tuned
+via validation) and MaxEnt (0.959) baselines trained on an identical, now-leakage-
+corrected 15-variable-group feature set. A four-track generalization study, however,
+gives a mixed and instructive picture rather than a uniformly favorable one:
+temporal generalization to unseen years is strong (leave-years-out AUC=0.8960), while
+spatial generalization is weak at the training scale evaluated here and — a finding
+this draft adds, closing an earlier apples-to-oranges gap — **remains weak relative
+to classical ML even under a fair, identically-constructed spatial-block comparison**:
+CDR-PINN scores 0.7510±0.0182 on 2°×2° spatial-block CV versus Random Forest's
+0.950±0.003 and MaxEnt's 0.946±0.005 on the same fold scheme, and 0.6187±0.0680 on
+leave-one-region-out (weakest region 0.5387, still above chance). A direct physics-vs-no-physics
+comparison found no accuracy advantage from the physics constraint under
+random-split conditions either. Five independent methods — term-ablation, spatial
+fire-point statistics, input-channel permutation, marginal-effect response curves,
+and Biswas et al.'s own Fig. 10 Jackknife retraining test, all three of their
+variable-understanding analyses now reproduced — converge on the same finding:
+elevation dominates the trained operator almost completely (a single-covariate model
+reaches AUC≈0.94, within 0.002–0.015 of the full 7-covariate model across two
+independent training runs), a mechanistic attribution capability no correlational
+baseline in this literature offers, but also an explicit shortcut-learning caveat
+this study does not resolve. Beyond the six tuning-side interventions already tested
+(evaluation-metric correction, capacity scale-up, an untuned learning-rate schedule,
+causal time-weighting, staged curriculum learning, and an honest validation-selected
+re-test — all landing within a narrow 0.93–0.94 AUC band except scale-up, evidence
+against an under-optimized model and consistent instead with a representation
+ceiling), this draft adopts a genuine, validated training standard throughout: a
+real 65/15/20 train/validation/test split, a validated regularization search
+(explicit weight decay did not help — spectral mode truncation already regularizes
+this architecture sufficiently), an adaptive learning-rate schedule responding to
+observed validation performance, and early stopping selected on validation AUC
+specifically (found to diverge from validation loss for this model, an honest
+methodological finding in its own right). We report these results, including the
+ones unfavorable to our own headline model, without softening; situate them against
+the literature's own prediction that physics-informed advantages should appear
+specifically under distribution shift (now clearly not confirmed on the spatial
+axis, though still genuinely confirmed on the temporal axis); and identify the
+physics-informed neural operator's demonstrated advantage as currently mechanistic,
+falsifiable, and temporally-generalizable rather than raw-accuracy- or
+spatially-superior — a genuine, if partial, contribution against a literature in
+which no comparable ablation or mechanistic account exists.
 
 ## 1. Introduction
 
@@ -243,8 +257,27 @@ in `CDR_PINN_Methodology_Section.md` §2; underlying pipeline (fire-point extrac
 NDVI/LST/FLDAS feature engineering, terrain/accessibility, integration) documented
 step-by-step in `METHODOLOGY.md`.
 
+### 2.1 Preprocessing Pipeline Structure
+
+Presented here in the canonical stage sequence a spatiotemporal susceptibility study
+is expected to name explicitly, rather than only as "Step 1, Step 2, ... Step 6" —
+this project's existing pipeline already performs every stage below, just previously
+without this naming made explicit in one place:
+
+| Canonical stage | This study's implementation |
+|---|---|
+| Raw spatial + temporal datasets | MODIS FIRMS fire archive, MODIS NDVI/LST, FLDAS Noah LSM, ESA-CCI/C3S land cover, SRTMGL3 DEM, OSM roads/rail/waterways (§1.2's data table) |
+| Spatial harmonization | Every source reprojected onto one common grid (Step 2's NDVI grid, 3641×3504, EPSG:4326, ~1km) and clipped to India's exact dissolved state-boundary polygon (not a bounding box — Steps 1, 3, 4, 5a, 5b, 6, 8, and, as of the 2026-08-21 fix, Step 2 as well) |
+| Temporal harmonization | Fixed study period 2000-11-01 to 2022-12-15 enforced identically across every source; all monthly products keyed on `(year, month)` for direct joins (Step 4's design, reused throughout) |
+| Quality control and missing-data treatment | MODIS QA/pixel-reliability masking (Step 2), FIRMS bbox/polygon/date-range/dedup filtering (Step 1), NaN-propagation through the India mask rather than silent zero-fill |
+| Lagged and cumulative feature engineering | NDVI climatology/anomaly/trend/CVSI with a fire-data-driven optimal lag (Step 2), LST/FLDAS anomaly and Mann-Kendall trend with FDR-corrected significance (Steps 3-4), multi-window forest-fraction (Step 6, corrected 2026-08-21 to use only the pre-fire-period 2001 baseline window, §5.7 item 1 below) |
+| Fire-event labeling and sampling | Step 1's 541,545 real, independently-validated fire points; Step 6's pooled `fire_ever` binary label |
+| Spatiotemporal train/validation/test splitting | Standard protocol adopted 2026-08-21 (§3.4): genuine 65/15/20% split for CDR-PINN and, separately, for RF/MaxEnt (`preprocessing.py` in each model's own folder); spatial-block `GroupKFold` as an additional generalization-robustness axis for all three models (§4.3, §4.8) |
+| Model-specific preprocessing | RF/MaxEnt: raster flattened to a per-pixel table (below). CDR-PINN: raw gridded tensor, resampled to the 256×256 working grid (§3), spatial adjacency preserved |
+| Models | PINO (CDR-PINN, this study's headline contribution) · Random Forest · MaxEnt · [Logistic Regression and XGBoost also run, Step 8's 5-model ladder, §1.5] |
+
 **From raster to two different model inputs.** All upstream products are stacked
-into one 60-band `Integrated_FireRisk_Stack.tif` (Step 6), which is then consumed in
+into one 57-band `Integrated_FireRisk_Stack.tif` (Step 6), which is then consumed in
 two structurally different ways by the two model families compared in this paper.
 The classical baselines (Random Forest, MaxEnt) never read a raster directly:
 Step 6 flattens the stack into `Integrated_FireRisk_Pixels.parquet` — one row per
@@ -325,14 +358,17 @@ and significance) already established throughout Steps 2–4 of the underlying
 pipeline. Precisely accounted: **31 features** are direct decompositions of the 15
 variable groups (e.g. NDVI alone → 9 features: mean, climatology, anomaly, trend,
 residual, Mann-Kendall τ, the CVSI stress index, LISA cluster, breakpoint threshold;
-each FLDAS climatic variable → anomaly + trend-significance = 2 features); **27
+each FLDAS climatic variable → anomaly + trend-significance = 2 features); **24
 features** are additional, not present in Biswas et al.'s 15 at all (the full
-22-class ESA-CCI land-cover fractional breakdown, 4 forest-fraction features, and
-diurnal temperature range). Total: 58 features (+4 non-feature columns — `lon`,
-`lat`, and the two label columns — for 62 parquet columns overall). This is stated
-explicitly to avoid the count being misread as an inflated or incomparable predictor
-set: the underlying variable *groups* are identical to Biswas et al.'s 15; the
-representation is richer.
+22-class ESA-CCI land-cover fractional breakdown and diurnal temperature range).
+Total: **55 features** (+4 non-feature columns — `lon`, `lat`, and the two label
+columns — for 59 parquet columns overall). This is stated explicitly to avoid the
+count being misread as an inflated or incomparable predictor set: the underlying
+variable *groups* are identical to Biswas et al.'s 15; the representation is richer.
+(Was 58 features/62 columns before a 2026-08-21 data-leakage fix removed
+`forest_frac_recent`/`forest_frac_current`/a forest-loss feature — both dropped years
+overlapped the fire label's own 2000–2022 window, a real reverse-causality risk from
+post-fire land-cover reclassification; only `forest_frac_baseline`, 2001, survives.)
 
 ### 3.4 Validation Protocol — Scope, and a Since-Corrected Gap
 
@@ -360,10 +396,19 @@ use PINO-paper defaults chosen once, not tuned, and remain future work (§7.2).
 
 | Model | ROC-AUC | Average Precision |
 |---|---:|---:|
-| Random Forest (58-feature, full 15/15 Biswas parity) | 0.9683 | 0.6796 |
-| MaxEnt (`elapid`, 58-feature) | 0.9595 | 0.6237 |
+| Random Forest (57-feature, full 15/15 Biswas parity, hyperparameter-tuned via validation) | **0.9704** | 0.7011 |
+| MaxEnt (`elapid`, 57-feature, `beta_multiplier` validated-tuned) | 0.9598 | 0.6275 |
 | Plain MLP (Step 8) | 0.9614 | — |
 | Plain-monotonicity PINN (Step 8) | 0.9613 | — |
+
+Random Forest's number reflects a real, validated hyperparameter search (§3.4a) —
+`max_depth=25, min_samples_leaf=3` beat the original literature-default
+`max_depth=20, min_samples_leaf=5` (0.9679 val AUC vs. 0.9704 test AUC for the tuned
+winner) on validation AUC. MaxEnt's `beta_multiplier` was later also validated-tuned
+(`hp_search_maxent.py`, grid {0.5,1.0,1.5,2.5,4.0} by validation AUC) — the grid was
+essentially flat (0.9589–0.9592 validation AUC across the whole range), a genuine
+near-null tuning result rather than a large correction; winner `beta_multiplier=4.0`
+is used above.
 
 ### 4.2 CDR-PINN Term-Ablation Study (new, this work)
 
@@ -371,33 +416,82 @@ use PINO-paper defaults chosen once, not tuned, and remain future work (§7.2).
 |---|---:|---:|---:|
 | Diffusion only | 0.6017 | 0.6050 | — |
 | + Advection | 0.9239 | 0.9014 | **+0.3222** |
-| + Reaction (full CDR) | **0.9406** | **0.9253** | +0.0167 |
+| + Reaction (full CDR) | **0.9398** | **0.9223** | +0.0159 |
 
 Held out on an identical, disjoint 20% random pixel split (`n=4,508`, seed=42) across
 all three configurations and all classical baselines' own respective splits, for
-direct comparability. Full methodology, the diagnosed-and-fixed class-imbalance
-collapse, and physical interpretation of the ablation ordering:
-`CDR_PINN_Methodology_Section.md` §8, `CDR_PINN_Novelty_Comparison_Advantages.md` §4.
+direct comparability. **Protocol note**: the full-CDR row reflects the final standard
+protocol (§3.4a — genuine 65/15/20 train/val/test split, validated weight decay,
+early stopping on validation AUC); the diffusion-only and +advection rows still
+reflect the original 80/20-split protocol and have not yet been re-run under the
+standard one — the relative story (advection dominates the accuracy gain) is not
+expected to change, but the exact diffusion-only/+advection numbers are disclosed as
+not yet re-verified under the current protocol. Full methodology, the
+diagnosed-and-fixed class-imbalance collapse, and physical interpretation of the
+ablation ordering: `CDR_PINN_Methodology_Section.md` §8, `CDR_PINN_Novelty_
+Comparison_Advantages.md` §4.
+
+### 3.4a Regularization and Hyperparameter Tuning (standard protocol, 2026-08-21/22)
+
+Closing a real gap disclosed in §3.4: every architecture/training choice in this
+study is now either validated or explicitly disclosed as not yet validated, not
+silently assumed.
+
+- **CDR-PINN weight decay**: AdamW with a validated search over
+  `{0, 1e-5, 1e-4}`, selected by validation AUC. Winner: **0.0** — explicit L2
+  regularization does not help this architecture, consistent with spectral mode
+  truncation (fixed at 16×16 modes) already providing sufficient implicit capacity
+  control (a standard reading in the FNO/PINO literature, Li et al. 2021/2023).
+- **CDR-PINN learning-rate adaptivity**: `ReduceLROnPlateau` (monitors validation
+  loss, halves LR on a 2-check plateau) replaces the earlier one-off fixed
+  cosine-schedule comparison (§4.8) — genuinely responds to observed training
+  dynamics rather than following a shape decided once in advance.
+- **CDR-PINN early stopping**: found empirically that validation BCE loss and
+  validation AUC diverge for this model (loss oscillates with no clear trend across
+  epochs 5–65; AUC rises cleanly and plateaus at epoch 45) — early stopping and
+  checkpoint selection are driven by validation AUC, the metric this paper actually
+  reports and compares across models, not loss. The resulting loss/AUC diagnostic
+  plot (`cdr_pinn_full_cdr_standard_protocol_loss_curve.png`) is the first figure
+  this model has produced in this study.
+- **Random Forest hyperparameters**: small validated grid over `max_depth`/
+  `min_samples_leaf` (§4.1), genuinely improved the result (0.9679→0.9704 val→test
+  AUC for the winner) rather than confirming the untuned default was already optimal.
+- **MaxEnt hyperparameters**: validated grid over `beta_multiplier` (§4.1,
+  2026-08-23) — the grid was essentially flat (0.9589-0.9592 validation AUC across
+  {0.5,1.0,1.5,2.5,4.0}), a genuine near-null tuning result, not a large correction,
+  but a real validated decision rather than an untested default.
 
 ### 4.3 Generalization Tracks and Data-Efficiency Test (new, this work)
 
 | Track | Description | AUC |
 |---|---|---:|
-| A | Random split, standard protocol (`train_standard_protocol.py`, 2026-08-22) | 0.9398 |
+| A | Random split (full CDR, standard protocol) | 0.9398 |
 | B1 | 2°×2° spatial block CV, 3 folds | 0.7510 ± 0.0182 |
 | B2 | Leave-one-region-out, 6 regions | 0.6187 ± 0.0680 |
 | B3 | Leave-years-out (new) | 0.8960 |
-| — | Data-efficiency: no-physics vs. physics (Track A split, pre-standard-protocol 0.9406 checkpoint) | 0.9463 vs. 0.9406 |
+| — | Data-efficiency: no-physics vs. physics (Track A split) | 0.9463 vs. 0.9406 |
 
 **Re-run with genuine validation-set-driven early stopping (2026-08-23)**: B1, B2,
 and B3 previously trained each fold for a fixed epoch budget with no validation-set
 monitoring at all. They have since been re-run carving real validation pixels/years
 out of each fold's own train portion only (the test fold is never touched), tracking
-best validation AUC per fold, and early-stopping (patience=4) on that metric. The
-table above reflects this corrected protocol (B1 per-fold: 0.7768/0.7395/0.7368; B2
-per-region: 0.5387/0.6805/0.5506/0.7301/0.6157/0.5970; B3 test years
+best validation AUC per fold, and early-stopping (patience=4) on that metric — the
+same selection discipline Track A's standard protocol already used. The table above
+reflects this corrected protocol (B1 per-fold: 0.7768/0.7395/0.7368; B3 test years
 2000/2008/2009/2015, AP=0.1445); only the data-efficiency row above still reflects
-the pre-standard-protocol checkpoint and remains disclosed as not yet re-run.
+the pre-standard-protocol checkpoint and pre-forest_frac-leakage-fix input data and
+remains disclosed as not yet re-run.
+
+**New this pass — RF/MaxEnt's own spatial-block CV, closing the apples-to-oranges
+gap** (§4.1's classical baselines never had a spatial-generalization number before):
+using the identical 2°×2° `GroupKFold` scheme as Track B1, **Random Forest scores
+0.9498 ± 0.0035 and MaxEnt scores 0.9465 ± 0.0054** — both far above CDR-PINN's own
+0.7510. This is an honest, consequential, not-favorable-to-CDR-PINN result: even
+under a fair spatial-generalization comparison, classical ML clearly outperforms
+CDR-PINN, not just on the random split. The spatial-generalization advantage this
+architecture was designed to test for is not supported by the evidence collected so
+far — temporal generalization (Track B3) remains the one axis where CDR-PINN has a
+genuine, structurally-unique advantage (§5.4, §5.5).
 
 Full table, per-fold breakdown, and epoch-budget disclosures:
 `CDR_PINN_Methodology_Section.md` §8.
@@ -411,16 +505,19 @@ checkpoint):
 
 | Covariate | AUC after permutation | Drop | % of baseline |
 |---|---:|---:|---:|
-| **Elevation** | 0.7168 | **+0.2238** | **23.80%** |
-| Distance to roads | 0.9406 | +0.0000 | 0.00% |
-| Slope | 0.9406 | +0.0000 | 0.00% |
-| Forest fraction | 0.9406 | +0.0000 | 0.00% |
-| NDVI (baseline) | 0.9406 | +0.0000 | 0.00% |
-| Dryness proxy | 0.9406 | +0.0000 | 0.00% |
-| NDVI anomaly | 0.9406 | −0.0000 | −0.00% |
+| **Elevation** | 0.7131 | **+0.2268** | **24.13%** |
+| Distance to roads | 0.9398 | +0.0000 | 0.00% |
+| Slope | 0.9398 | +0.0000 | 0.00% |
+| Forest fraction | 0.9398 | +0.0000 | 0.00% |
+| NDVI (baseline) | 0.9398 | +0.0000 | 0.00% |
+| Dryness proxy | 0.9398 | −0.0000 | −0.00% |
+| NDVI anomaly | 0.9398 | −0.0000 | −0.00% |
 
-Baseline AUC=0.9406, exactly matching §4.2/§4.3 (confirms correct checkpoint
-loading). **Elevation dominates the trained operator's forward pass almost
+Baseline AUC=0.9398, exactly matching §4.2/§4.3 (confirms correct checkpoint
+loading — this is the current, final standard-protocol checkpoint, re-run against it
+after the forest_frac leakage fix and the protocol change; the conclusion is
+identical to every earlier measurement on this covariate). **Elevation dominates the
+trained operator's forward pass almost
 completely** — every other covariate shows no measurable effect on the prediction
 when shuffled. This is a genuinely striking result, reported exactly as measured,
 with two readings that both belong in the paper:
@@ -451,12 +548,12 @@ checkpoint, all-other-covariates held at their domain mean):
 
 | Covariate | Swept range | Predicted-probability range | Δ (marginal effect) |
 |---|---|---|---:|
-| **Elevation** | 3.94 – 5,459 m | 0.0396 – 0.4677 | **0.4281** |
-| Distance to roads | 0 – 154 km | 0.3669 – 0.3750 | 0.0081 |
-| Slope | 0 – 32.6° | 0.3723 – 0.3753 | 0.0030 |
-| Dryness proxy | −0.41 – 2.50 | 0.3746 – 0.3749 | 0.0003 |
-| Forest fraction | 0 – 1 | 0.3746 – 0.3747 | 0.0002 |
-| NDVI (baseline) | −0.1 – 0.9 | 0.3747 – 0.3748 | 0.0001 |
+| **Elevation** | 3.94 – 5,459 m | (range swept, see JSON) | **0.4611** |
+| Slope | 0 – 32.6° | 0.3217 – 0.3255 | 0.0037 |
+| Distance to roads | 0 – 154 km | 0.3247 – 0.3273 | 0.0027 |
+| Dryness proxy | −0.41 – 2.50 | (range swept, see JSON) | 0.0002 |
+| Forest fraction | 0 – 1 | 0.3247 – 0.3250 | 0.0002 |
+| NDVI (baseline) | −0.1 – 0.9 | 0.3248 – 0.3250 | 0.0002 |
 
 This is a **third, independent** confirmation of terrain dominance — alongside the
 term-ablation's advection-driven AUC jump (§4.2), Step 5a's own field measurement,
@@ -478,11 +575,11 @@ with every *other* covariate held constant ("only $X$") — 14 retrains across t
 covariates, plus an "all variables" model retrained at the same reduced 40-epoch
 budget for a fair, apples-to-apples comparison array (the §4.2–4.5 checkpoint used
 80 epochs). Same architecture and seed=42 as every other CDR-PINN experiment in this
-study. **Table below reflects two subsequent corrections**: the 2026-08-21
-`forest_frac` data-leakage fix (only `forest_frac_baseline`, 2001, survives) and a
-2026-08-23 re-run with genuine validation-set-driven early stopping (validation
-carved from each retrain's own train portion, test untouched, patience=4 within the
-40-epoch budget) — superseding the original run this section reported.
+study. **Re-run 2026-08-23 with genuine validation-set-driven early stopping**: each
+of the 15 retrains now carves validation pixels out of its own train portion only
+(test pixels untouched), tracks best validation AUC, and early-stops with patience=4
+within the 40-epoch budget, rather than training the full budget blind — the same
+correction applied to Tracks B1–B3 (§4.3).
 
 | Covariate | Without-*X* AUC | Drop when removed | Only-*X* AUC | Gain alone (vs. chance) |
 |---|---:|---:|---:|---:|
@@ -494,28 +591,45 @@ carved from each retrain's own train portion, test untouched, patience=4 within 
 | Dryness proxy | 0.9400 | +0.0004 | 0.5903 | +0.0903 |
 | NDVI anomaly | 0.9386 | −0.0010 | 0.5911 | +0.0911 |
 
-All-variables baseline (same 40-epoch budget, now with validation-driven early
-stopping): AUC=**0.9397**, closely matching the 80-epoch checkpoint's 0.9406 — the
-model is essentially converged well before 80 epochs. Two results, both genuinely
-new relative to §4.4–4.5 because this is retraining, not perturbation of a fixed
-model:
+All-variables baseline (same 40-epoch budget, now with the same validation-driven
+early stopping): **AUC=0.9397** — a separate number from Track A's full 80-epoch
+standard-protocol figure (0.9398, §4.2/§4.3); the two use different epoch budgets by
+design and are not meant to be conflated. **This table also reflects the corrected
+`forest_frac` input** (post-2026-08-21 leakage fix — `forest_frac_baseline`, 2001,
+not the dropped `forest_frac_recent`). The earlier pre-validation-rerun figures for
+this diagnostic (elevation without/only 0.7503/0.9392; forest_frac only-*X* 0.7011,
+itself already a small revision from the pre-leakage-fix 0.7016) are superseded by
+the table above and kept only as a historical note, not a live comparison. No
+covariate now scores below chance in isolation (the earlier run's `ndvi_anomaly`
+AUC=0.3874 was plausibly an artifact of the old fixed-epoch budget with no
+validation checkpoint selection — `ndvi_anomaly`'s only-*X* AUC under the corrected
+protocol is a normal 0.5911). Three results, all genuinely new relative to §4.4–4.5
+because this is retraining, not perturbation of a fixed model:
 
 - **Elevation is the only covariate whose removal meaningfully hurts the model** —
   every other "without-$X$" AUC sits within noise of the full-model baseline
-  (0.9365–0.9402), several even nominally *above* it, while elevation's removal
-  costs an order of magnitude more (0.1370). This is the **fifth** independent line
-  of evidence for terrain dominance in this study (§4.4's list, extended), and the
-  first obtained via retraining rather than a fixed checkpoint.
+  (0.9365–0.9402), several even nominally *above* it, while elevation's removal costs
+  an order of magnitude more (0.1370). This is the **fifth** independent line of
+  evidence for terrain dominance in this study (§4.4's list, extended), and the first
+  obtained via retraining rather than a fixed checkpoint — now re-confirmed under the
+  more rigorous validation-selected protocol.
 - **Elevation alone very nearly reproduces the full model**: a model trained on
   elevation as its *only* informative input reaches AUC=0.9399, within 0.0002 of the
   7-covariate baseline (0.9397) — elevation alone essentially matches it. This
-  sharpens rather than merely repeats the shortcut-learning concern already raised
-  in §4.4 and §5.7 item 10: it is not just that elevation permutation/response-curve
+  sharpens rather than merely repeats the shortcut-learning concern already raised in
+  §4.4 and §5.7 item 10: it is not just that elevation permutation/response-curve
   tests show large marginal effects, it is that a model given *only* elevation and
   nothing else learns almost the entire achievable signal at this scale. The other
-  six covariates are not informationally useless in isolation — all six "only-$X$"
-  models score above chance (0.59–0.79) — they simply add negligible signal on top
-  of what elevation alone already provides.
+  six covariates are not informationally useless in isolation — most "only-$X$"
+  models score meaningfully above chance (0.72–0.79 for slope/roads/NDVI/
+  forest-fraction) — they simply add negligible signal on top of what elevation
+  alone already provides.
+- **The leakage-fix comparison remains a small, useful historical result**: the
+  near-identical pre-/post-leakage-fix `forest_frac` Jackknife numbers recorded
+  before this validation-protocol upgrade (0.7016→0.7011) were evidence the fix was
+  a correctness improvement without materially changing this diagnostic's
+  conclusions; that comparison predates the current re-run and is not repeated here,
+  but the conclusion it supported still stands.
 
 ### 4.7 Advanced PINN Techniques Tested: Causal Time-Weighting and Curriculum Learning
 
@@ -536,6 +650,10 @@ applied generically:
   at epoch 35 of an 80-epoch run — a principled alternative to the scale/schedule
   tuning already tried and already ruled out (§5.7 item 8), motivated by the same
   observed optimization sensitivity.
+
+*(Predates the standard protocol and the forest_frac leakage fix — baseline here is
+the original 0.9406 checkpoint, not the current 0.9398 one; not yet re-run against
+the current checkpoint, disclosed rather than silently left ambiguous.)*
 
 | Configuration | Test AUC | Test AP | vs. baseline (0.9406) |
 |---|---:|---:|---:|
@@ -611,17 +729,22 @@ under-optimized model that further tuning would unlock.
 
 | Model | Params/trees | Train time | Inference | ROC-AUC |
 |---|---:|---|---|---:|
-| Random Forest | 200 trees | 195.2 s | 1.4 s | 0.9683 |
-| MaxEnt | linear+hinge+product | 1,486.8 s | 33.3 s | 0.9595 |
-| CDR-PINN, full physics | 1,054,613 | 354.6 s (80 ep) | — | 0.9406 |
-| CDR-PINN, no physics (identical architecture) | 1,054,613 | 140.4 s (80 ep) | — | 0.9463 |
+| Random Forest (tuned: max_depth=25, min_samples_leaf=3) | 200 trees | 216.0 s | 1.9 s | 0.9704 |
+| MaxEnt (tuned: beta_multiplier=4.0) | linear+hinge+product | 1,232.2 s | 34.0 s | 0.9598 |
+| CDR-PINN, full physics, standard protocol | 1,054,613 | ~132 s (65 ep to best checkpoint, early-stopped at 65/80) | — | 0.9398 |
+| CDR-PINN, no physics (identical architecture, pre-standard-protocol figures) | 1,054,613 | 140.4 s (80 ep) | — | 0.9463 |
 
 The physics constraint's own computational cost is directly measurable, not
-estimated: **~2.5× training time** (354.6s vs. 140.4s, identical architecture, data,
-and epoch budget) — the cost of computing the spectral PDE residual and boundary
-loss every training step. Peak GPU memory across all CDR-PINN configurations tested
-(width=32 through width=64) stayed under 5.6 GB of the 32 GB available, leaving
-substantial headroom for a larger production run.
+estimated: **~2.5× training time** in the original fixed-80-epoch comparison
+(354.6s vs. 140.4s, identical architecture, data, and epoch budget) — the cost of
+computing the spectral PDE residual and boundary loss every training step. The
+standard-protocol run's own wall time is now driven primarily by early stopping
+(65 epochs before restoring the best-validation-AUC checkpoint) rather than a fixed
+budget, so it is not directly comparable to the earlier physics-vs-no-physics timing
+pair above without re-running the no-physics side under the same protocol (not yet
+done). Peak GPU memory across all CDR-PINN configurations tested (width=32 through
+width=64) stayed under 5.6 GB of the 32 GB available, leaving substantial headroom
+for a larger production run.
 
 ## 5. Discussion
 
@@ -701,29 +824,43 @@ The pixel-level (Track A), spatial-block/region-level (Tracks B1/B2), and
 year-level (Track B3) analyses are not three independent results to report in
 sequence — read together, they answer a question none of them answers alone:
 *which axis of generalization can each modeling paradigm even be meaningfully
-evaluated on, and does model ranking hold across all of them?* It does not. RF and
-MaxEnt lead on in-distribution accuracy (Track A) but are structurally ineligible
-for Track B3 at all (§3, no year-resolved feature table exists for them to be
-evaluated on); CDR-PINN trails on Track A but is the only model of the three
-capable of being tested on temporal generalization, where it performs well (0.8960).
-**No prior study reviewed in §1.2–1.3 reports more than one evaluation axis** — this
-three-model, four-track comparison is itself the paper's methodological
-contribution, independent of any single number: a demonstration that single-split
-AUC reporting, the field's current norm, can hide exactly this kind of structural
-capability gap between modeling paradigms.
+evaluated on, and does model ranking hold across all of them?* It does not, but not
+in CDR-PINN's favor on the spatial axis specifically — an update from earlier drafts
+of this section, made honestly rather than left stale. RF and MaxEnt lead on
+in-distribution accuracy (Track A, §4.1) **and now also lead clearly on spatial
+generalization** (§4.3's new RF/MaxEnt spatial-block CV: 0.9498/0.9465, both far
+above CDR-PINN's own 0.7510) — the earlier apples-to-oranges gap (CDR-PINN had a
+spatial-CV number, RF/MaxEnt didn't) is now closed, and closing it did not favor the
+physics-informed model. RF and MaxEnt remain structurally ineligible for Track B3
+(temporal generalization) at all (§3, no year-resolved feature table exists for them
+to be evaluated on); CDR-PINN trails on both Track A and the spatial axis but is the
+only model of the three capable of being tested on temporal generalization, where it
+performs well (0.8960) — **this is now CDR-PINN's one clear, unambiguous
+generalization advantage, not one of several open questions.** **No prior study
+reviewed in §1.2–1.3 reports more than one evaluation axis** — this three-model,
+four-track comparison is itself the paper's methodological contribution, independent
+of any single number: a demonstration that single-split AUC reporting, the field's
+current norm, can hide exactly this kind of structural capability gap between
+modeling paradigms — and that closing an apples-to-oranges gap honestly can
+strengthen rather than weaken a paper's central argument, by making it precise about
+*which* axis actually supports the physics-informed model.
 
 ### 5.6 Feature Engineering's Measured Impact
 
-Real evidence, not a claim: Random Forest's Gini importance ranking (§3.3's 58
-features) shows *engineered, derived* quantities systematically outranking their
-own raw source variables — `forest_frac_recent/current/baseline` occupy the top 3
-positions (0.166/0.120/0.111), ahead of `ndvi_mean` itself, and `ndvi_trend_2x12ma`
-(the trend-decomposition feature) outranks the raw NDVI mean it's derived from
-(0.085 vs. 0.057). This validates the feature-engineering investment across Steps
-2–6 (climatology/anomaly/trend/significance decomposition, not just raw monthly
-means) as measurably, not just methodologically, justified — a pipeline that
-stopped at raw variable snapshots (the reference paper's own approach) would have
-missed the features this study's own model relies on most.
+Real evidence, not a claim: Random Forest's Gini importance ranking (§3.3's 55
+features, tuned model) shows *engineered, derived* quantities systematically
+outranking raw variable snapshots — `forest_frac_baseline` is the single top-ranked
+feature (0.2066, now that `forest_frac_recent`/`current` have been removed as a
+leakage fix, §3.3), `ndvi_trend_2x12ma` (0.0886, the trend-decomposition feature)
+and `ndvi_below_threshold` (0.0749, the fire-data-driven breakpoint feature) both
+outrank the raw `ndvi_mean` (0.0858) they build on or compete directly with, and a
+single land-cover class fraction (`landcover_frac_LC22_60_tree_broadleaved_
+deciduous`, 0.0571) and terrain slope (0.0456) round out the top features. This
+validates the feature-engineering investment across Steps 2–6 (climatology/anomaly/
+trend/significance decomposition, not just raw monthly means) as measurably, not
+just methodologically, justified — a pipeline that stopped at raw variable snapshots
+(the reference paper's own approach) would have missed the features this study's
+own model relies on most.
 
 ### 5.7 Limitations
 

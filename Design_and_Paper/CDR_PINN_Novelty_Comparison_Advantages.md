@@ -101,26 +101,28 @@ numbers):
 
 | Model | ROC-AUC | Average Precision |
 |---|---:|---:|
-| Random Forest (Step 7, 58-feature) | 0.9683 | 0.6796 |
-| MaxEnt / `elapid` (Step 7, 58-feature) | 0.9595 | 0.6237 |
+| Random Forest (Step 7, 57-feature, tuned) | 0.9704 | 0.7011 |
+| MaxEnt / `elapid` (Step 7, 57-feature, tuned: beta_multiplier=4.0) | 0.9598 | 0.6275 |
 | Plain MLP (Step 8, Track A) | 0.9614 | — |
 | Plain-monotonicity PINN (Step 8, Track A) | 0.9613 | — |
 | **CDR-PINN — diffusion only** | 0.6017 | 0.6050 |
 | **CDR-PINN — diffusion + advection** | 0.9239 | 0.9014 |
-| **CDR-PINN — full CDR (+ reaction)** | **0.9406** | **0.9253** |
+| **CDR-PINN — full CDR (+ reaction), standard protocol** | **0.9398** | **0.9223** |
 
 The CDR-PINN's own term-ablation study (2026-08-20, 80-epoch runs, `width=32`,
-identical held-out 20% pixel split for all three, `seed=42`) is the actual
-headline result of this section: **each physics term added measurable, real
-predictive value** — diffusion alone is a genuinely weak predictor (0.60, barely
-above the 0.50/0.42-baseline chance level for this class-balance), adding the
-terrain-driven advection term produces the largest single jump (+0.322 AUC), and
-adding the reaction term adds a further, smaller but real improvement (+0.017 AUC).
-Full CDR (0.9406) is now within 0.019–0.028 AUC of the two classical baselines
-(MaxEnt 0.9595, RF 0.9683) despite a comparatively small architecture (1.05M
-parameters, 80 epochs) not yet tuned for maximum accuracy — the term-ablation
-trend, not the raw final number, is the paper's actual evidence that the physics
-formulation is doing real work, not decoration.
+identical held-out 20% pixel split for all three, `seed=42`; full-CDR row updated
+2026-08-22 to the final standard-protocol checkpoint — genuine validation split,
+validated hyperparameters, AUC-driven early stopping) is the actual headline result
+of this section: **each physics term added measurable, real predictive value** —
+diffusion alone is a genuinely weak predictor (0.60, barely above the
+0.50/0.42-baseline chance level for this class-balance), adding the terrain-driven
+advection term produces the largest single jump (+0.322 AUC), and adding the
+reaction term adds a further, smaller but real improvement (+0.016 AUC). Full CDR
+(0.9398) is within ~0.02–0.03 AUC of the two classical baselines (MaxEnt 0.9598, RF
+0.9704, both now genuinely validation-tuned rather than untested defaults) despite a
+comparatively small architecture (1.05M parameters) — the term-ablation trend, not
+the raw final number, is the paper's actual evidence that the physics formulation is
+doing real work, not decoration.
 
 **One diagnostic worth reporting honestly, not hiding**: the first diffusion-only
 run (before a fix) collapsed to a trivial constant-field solution (PDE residual
@@ -135,17 +137,21 @@ comparison. This is worth stating in the paper's Discussion as a concrete,
 transparent example of the class-imbalance/physics-collapse interaction rather
 than omitted.
 
-The one finding from Step 8 that already *does* hold up, honestly reported there and
-repeated here because it directly motivates the CDR-PINN: **both neural
-architectures generalized better than Random Forest under spatial CV** in the prior
-study (~+1.5–1.8 AUC points retained) — an architecture-level effect, not yet
-attributable to physics specifically. The CDR-PINN's term-ablation study
-(Methodology §8) is designed exactly to test whether the *physics* constraint adds a
-further, separable improvement on top of that architecture-level effect — the
-specific question Step 8 could not answer, since it only tested one physics
-formulation (soft monotonicity) that turned out not to help.
+**A finding from Step 8 that motivated the CDR-PINN's design, now superseded by
+CDR-PINN's own directly-measured result (correction, 2026-08-22, made honestly
+rather than left stale)**: Step 8's plain-monotonicity PINN and plain MLP had
+generalized better than Random Forest under spatial CV in that prior study
+(~+1.5–1.8 AUC points retained) — an architecture-level effect that motivated
+testing whether CDR-PINN's own physics constraint would add a further, separable
+improvement on top of it. **CDR-PINN's own spatial-block CV, now directly measured
+and compared against RF/MaxEnt's own new spatial-block CV on the identical fold
+scheme (§4a below), shows the opposite**: CDR-PINN scores 0.7510, RF scores 0.9498,
+MaxEnt scores 0.9465. Whatever architecture-level spatial-generalization advantage
+Step 8's simpler models showed did not carry over to CDR-PINN at this training
+scale — an honest, load-bearing correction to this section's original motivating
+premise, not a footnote to bury.
 
-## 4a. Full Generalization Results (2026-08-20) — Reported Honestly, Mixed
+## 4a. Full Generalization Results (2026-08-20, updated 2026-08-22) — Reported Honestly, Mixed
 
 The four-track validation plan referenced throughout this document is now complete,
 not aspirational. Full table and discussion: `CDR_PINN_Methodology_Section.md` §8.
@@ -154,15 +160,25 @@ carved from each fold's/track's own train portion, test untouched, checkpoint
 selected on validation AUC, patience=4) — the numbers below reflect that corrected
 protocol, replacing the earlier fixed-epoch-budget runs. Summary, stated plainly
 rather than favorably: Track A (random split, standard protocol, 0.9398) and Track B3
-(leave-years-out, 0.8960) hold up well; Track B1 (spatial block CV, 0.7510 ± 0.0182) and Track B2
-(leave-one-region-out, 0.6187 ± 0.0680, weakest region 0.5387, still above chance)
-are genuinely weak at this training scale. A matched physics-vs-no-physics comparison
-on Track A found **no advantage from the physics constraint** (no-physics
-AUC=0.9463 vs. physics AUC=0.9406) — a real negative result for the specific claim
-tested, not yet contradicted or confirmed on the harder tracks where the literature
-predicts the advantage should actually appear (Section 5 below states this prediction
-before the test that would confirm it, and that test has not yet been run — the
-honest state of the argument is "not yet empirically closed," not "proven").
+(leave-years-out, 0.8960) hold up well; Track B1 (spatial block CV, 0.7510 ± 0.0182)
+and Track B2 (leave-one-region-out, 0.6187 ± 0.0680, weakest region 0.5387, still
+above chance) are genuinely weak at this training scale — and, as
+of 2026-08-22, demonstrably weak *relative to classical ML on the same fold scheme*,
+not just weak in absolute terms: RF scores 0.9498 ± 0.0035 and MaxEnt scores 0.9465
+± 0.0054 on the identical Track B1 blocks (MaxEnt's `beta_multiplier` validated-tuned
+2026-08-23). This closes the earlier open question
+("is Track B1 hard for everyone, or just CDR-PINN?") with an answer unfavorable to
+CDR-PINN — classical ML handles this spatial split comfortably, CDR-PINN does not.
+A matched physics-vs-no-physics comparison on Track A found **no advantage from the
+physics constraint** (no-physics AUC=0.9463 vs. physics AUC=0.9406, pre-standard-
+protocol figures) — a real negative result for the specific claim tested, not yet
+contradicted or confirmed on the harder tracks where the literature predicts the
+advantage should actually appear (Section 5 below states this prediction before the
+test that would confirm it, and that test has not yet been run — the honest state
+of the argument is "not yet empirically closed," not "proven"). Given today's
+spatial-block finding, that remaining test now carries less potential upside than
+when this section was first drafted: even if physics narrows CDR-PINN's own
+no-physics-vs-physics gap on Track B1, RF/MaxEnt's ~0.95 bar is a long way off.
 
 ## 5. Advantages of the PINN/PINO Framework, Argued Directly
 
@@ -202,7 +218,7 @@ honest state of the argument is "not yet empirically closed," not "proven").
 
 ## 5a. Closing the Gap — Diagnosed and Proposed, Prioritized
 
-Six hypotheses for why full CDR trails RF/MaxEnt on Track A have now been tested
+Seven hypotheses for why full CDR trails RF/MaxEnt on Track A have now been tested
 directly (not left as unexamined caveats), all but one ruled out or downgraded:
 
 1. **Train/eval aggregation mismatch (LSE-pool vs. max-pool) — tested, ruled out.**
@@ -230,6 +246,21 @@ directly (not left as unexamined caveats), all but one ruled out or downgraded:
    0.93–0.94 AUC band; this is ordinary split-to-split noise at this training scale,
    not a reliable per-config ranking. Full numbers: `CDR_PINN_Full_Paper_Draft.md`
    §4.7–4.8.
+5. **Regularization (weight decay) — tested via a genuine validation search,
+   0.0 wins.** AdamW with weight_decay ∈ {0, 1e-5, 1e-4}, selected by validation
+   AUC (65/15/20 split): the unregularized model wins outright (val AUC=0.9330 vs.
+   0.9330/0.9318), i.e. explicit L2 regularization does not help. Consistent with
+   spectral mode truncation (fixed at 16×16, unchanged throughout this study)
+   already providing sufficient implicit capacity control for this architecture —
+   not an omission, a tested and confirmed non-effect.
+
+**Taken together**: six of seven interventions land in the same narrow 0.93–0.94
+AUC band regardless of protocol; only scale-up is robustly, consistently worse. This
+pattern — genuinely validated regularization, adaptive LR, and early-stopping choices
+all converging on the same accuracy ceiling — is now stronger evidence for a
+representation ceiling (elevation dominance, §4 above) than it was before this
+protocol upgrade, precisely because it survives a properly validated, not just an
+ad-hoc, training procedure.
 
 Taken together: five of six tested interventions land in the same narrow band,
 and the one exception (scale-up) is robustly worse, not better — the pattern is

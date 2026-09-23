@@ -245,34 +245,41 @@ lesson for the field, independent of who wins.
 ## Q8. Feature engineering (e.g., NDVI) — what's the actual impact?
 
 Real, measured impact, not a claim: Step 7's Random Forest Gini importance ranking
-(58-feature model, 2026-08-20 retrain) is the direct evidence.
+(55-feature model, tuned via validation, 2026-08-22 retrain — updated after a
+2026-08-21 data-leakage fix removed `forest_frac_recent`/`current`) is the direct
+evidence.
 
 **Top features, and what they tell you about which engineering choices paid off**:
 
 | Rank | Feature | Importance | What this validates |
 |---|---|---:|---|
-| 1 | `forest_frac_recent` | 0.1657 | LULC forest-fraction engineering (Step 6) — the single most informative feature in the whole 58-feature set |
-| 2 | `forest_frac_current` | 0.1198 | same family |
-| 3 | `forest_frac_baseline` | 0.1112 | same family — all three forest-fraction snapshots rank top-3, confirming the 2026-08-10 forest-class reconciliation (13-code definition) was the right fix |
-| 4 | `ndvi_trend_2x12ma` | 0.0851 | the trend-decomposition feature engineering (Step 2, classical 2×12-MA), not the raw NDVI mean, is what matters most from the NDVI feature family |
-| 5 | `ndvi_mean` | 0.0571 | the simplest NDVI feature still contributes, but less than its own derived trend |
-| 6 | `terrain_slope` | 0.0492 | validates Step 5a's terrain engineering — directly corroborates Biswas et al.'s own 16.7% slope contribution |
+| 1 | `forest_frac_baseline` | 0.2066 | LULC forest-fraction engineering (Step 6) — the single most informative feature in the whole 55-feature set, now that the leakage-risk `recent`/`current` snapshots have been removed |
+| 2 | `ndvi_trend_2x12ma` | 0.0886 | the trend-decomposition feature engineering (Step 2, classical 2×12-MA), not the raw NDVI mean, is what matters most from the NDVI feature family |
+| 3 | `ndvi_mean` | 0.0858 | the simplest NDVI feature still contributes, close behind its own derived trend |
+| 4 | `ndvi_below_threshold` | 0.0749 | the fire-data-driven breakpoint feature (Step 2) — a genuinely novel, data-derived threshold, not an assumed constant |
+| 5 | `ndvi_clim_june` | 0.0629 | seasonal climatology matters, not just the annual mean |
+| 6 | `terrain_slope` | 0.0456 | validates Step 5a's terrain engineering — directly corroborates Biswas et al.'s own 16.7% slope contribution |
 
 **The general lesson, worth stating explicitly**: engineered *derived* features
-(forest fraction, NDVI trend) outrank their own raw/simpler source variables — this
-justifies the feature-engineering investment across Steps 2–6 as more than
-methodological thoroughness; it's measurably what the model actually relies on. The
-9 raw NDVI-only features would have missed this if the pipeline had stopped at
-`ndvi_mean` alone.
+(forest fraction, NDVI trend, the breakpoint feature) outrank raw/simpler source
+variables — this justifies the feature-engineering investment across Steps 2–6 as
+more than methodological thoroughness; it's measurably what the model actually
+relies on. The 9 raw-NDVI-only features would have missed this if the pipeline had
+stopped at `ndvi_mean` alone. **Note on the leakage fix's own impact on this
+table**: with `forest_frac_recent`/`current` removed, `forest_frac_baseline` alone
+now carries roughly what those three features carried combined (was
+0.166+0.120+0.111=0.397 vs. now 0.2066) — a real, measurable redistribution, not
+just a relabeling, though total accuracy barely moved (§Q-headline numbers).
 
 ---
 
-## Q9. 15 variables (Biswas) vs. 62 columns (this study) — reconciled precisely
+## Q9. 15 variables (Biswas) vs. 59 columns (this study) — reconciled precisely
 
 **Real, exact accounting** (verified against the actual parquet schema, not
-approximated): the parquet has 62 columns total — 4 are not features at all
-(`lon`, `lat`, `fire_count`, `fire_ever` — georeferencing and labels, dropped before
-training), leaving **58 features**. Of those 58:
+approximated; updated 2026-08-21 after a data-leakage fix — see below): the parquet
+has **59 columns** total — 4 are not features at all (`lon`, `lat`, `fire_count`,
+`fire_ever` — georeferencing and labels, dropped before training), leaving **55
+features**. Of those 55:
 
 - **31 features** are richly-engineered decompositions of Biswas's original 15
   variable *groups* — e.g., Biswas's single "air temperature" raster becomes this
@@ -280,18 +287,27 @@ training), leaving **58 features**. Of those 58:
   anomaly + trend-significance, not just one raw snapshot); NDVI alone becomes 9
   features (mean, climatology, anomaly, trend, residual, Mann-Kendall τ, the novel
   CVSI index, LISA cluster, breakpoint threshold).
-- **27 features** are genuinely additional, not part of Biswas's 15 at all: the full
-  22-class ESA-CCI land-cover fractional breakdown (`landcover_frac_LC22_*`), the 4
-  forest-fraction features (Q8 above), and DTR (diurnal temperature range, a natural
-  derived quantity from day/night LST that Biswas doesn't separately track).
+- **24 features** are genuinely additional, not part of Biswas's 15 at all: the full
+  22-class ESA-CCI land-cover fractional breakdown (`landcover_frac_LC22_*`) and DTR
+  (diurnal temperature range, a natural derived quantity from day/night LST that
+  Biswas doesn't separately track).
 
-**Impact of this choice, stated honestly**: this is *not* a claim of having 62
+**2026-08-21 correction**: this table originally listed 58 features/62 columns,
+including `forest_frac_recent` (2020) and `forest_frac_current` (2022) as 2 of the
+"4 forest-fraction features." Both were dropped as a data-leakage fix — they
+overlapped the pooled 2000–2022 fire label's own time window, a real
+reverse-causality risk (published literature documents burned forest commonly gets
+reclassified to shrubland/agriculture in later land-cover products). Only
+`forest_frac_baseline` (2001) survives, now counted among the 31 Biswas-group
+decompositions rather than as a separate "additional" bonus family.
+
+**Impact of this choice, stated honestly**: this is *not* a claim of having 59
 independent Biswas-equivalent predictors — it's the same 15 conceptual variable
 groups represented with the temporal-decomposition machinery (climatology/anomaly/
 trend/significance) this whole pipeline is built around, plus a genuinely useful
 bonus (land cover class detail) Biswas's own MaxEnt input never had access to at
 this granularity. State this distinction explicitly in the paper's data section —
-"15 variable groups, richly feature-engineered into 58 total predictors" — so a
+"15 variable groups, richly feature-engineered into 55 total predictors" — so a
 reviewer doesn't misread it as an inflated or incomparable predictor count.
 
 ---
@@ -303,9 +319,10 @@ raw `.tif` files directly. The flattening happens entirely in **Step 6**:
 
 1. Every upstream step's output (NDVI, LST, FLDAS, land cover, terrain,
    accessibility — all GeoTIFFs on the shared ~3641×3504 NDVI grid) is stacked into
-   one 60-band `Integrated_FireRisk_Stack.tif`.
+   one 57-band `Integrated_FireRisk_Stack.tif` (was 60-band before the 2026-08-21
+   leakage fix removed 3 forest-fraction bands, Q9 above).
 2. Step 6 then **flattens** this stack: for every pixel that passes the validity
-   mask (`india_mask & ~isnan(ndvi_mean)`), each of the 60 bands' value at that
+   mask (`india_mask & ~isnan(ndvi_mean)`), each of the 57 bands' value at that
    pixel becomes one column value in one row of `Integrated_FireRisk_Pixels.parquet`
    — a standard raster-to-tabular "stack and ravel" operation, restricted to
    in-India, non-NaN pixels only (4,161,009 rows survive out of the full grid).

@@ -115,7 +115,7 @@ MaxEnt contribution), advection ↔ topographic (9.7%), reaction ↔ human-activ
 
 ## 4. Network Architecture
 
-![CDR-PINN architecture: PINO/FNO backbone plus the three physics heads and the four-term adaptive loss](../CDR_PINN_Data/cdr_pinn_architecture_diagram.png)
+![CDR-PINN architecture: PINO/FNO backbone plus the three physics heads and the four-term adaptive loss](Physics_Informed_FireRisk_Model/CDR_PINN_Data/cdr_pinn_architecture_diagram.png)
 
 *The one-step operator $G_\theta(u_t, a_t) \to u_{t+1}$ (top) lifts the 8-channel input (7
 covariates + the current state $u_t$) to 32 channels, passes it through 4 stacked Fourier blocks
@@ -166,6 +166,51 @@ model's capacity is overwhelmingly spent on the general-purpose operator backbon
 on the physics constraint itself, which is architecturally minimal by design (§7.6 of
 the diffusion document: "an oversized network risks overfitting a smooth function with
 no benefit" — the same minimal-parameter philosophy extended to all three heads).
+
+### 4.1a Architecture in Standard Deep-Learning Terminology
+
+Stated explicitly, since an FNO's building blocks map onto CNN vocabulary
+(channels/kernel/stride/padding/pooling) only partially, and every prior draft of this
+section left that mapping implicit — worth a reviewer's read without guessing:
+
+- **Channels.** Input channel count is **7** (the static+time-varying covariate stack:
+  NDVI baseline, NDVI monthly anomaly, forest fraction, dryness proxy, slope, distance
+  to roads, elevation) plus the evolving scalar state `u_t`, lifted to a **hidden
+  width of 32 channels** by the lifting layer and held at that width through all 4
+  spectral blocks, then projected back down to **1 output channel** (the next-month
+  state `u_{t+1}`) by the two-layer projection head.
+- **"Kernel."** The FNO backbone has no spatial kernel or receptive-field expansion in
+  the CNN sense anywhere. Each spectral block's non-spectral path — the channel-mixing
+  skip connection run in parallel with the spectral convolution — is a **pointwise 1×1
+  convolution**: literally `kernel_size=1, stride=1, padding=0`, i.e. a per-pixel linear
+  layer (a `32→32` channel mixing matrix) applied identically and independently at
+  every one of the grid's spatial locations, with no neighborhood mixing at all. The
+  lifting layer (`7→32`) and the two projection layers (`32→32→1`) are the same
+  `kernel_size=1` pointwise operation. **No layer in this network has a spatial kernel
+  larger than 1×1** — all spatial mixing happens exclusively through the spectral
+  convolution (§4.3), which operates in the frequency domain via a fixed **16×16
+  Fourier-mode truncation**, not a sliding-window kernel at all. Calling this a
+  "kernel" would be a category error worth avoiding in a methods section: it is a
+  global spectral filter (every retained mode is a function of the *entire* spatial
+  field), not a local, translation-invariant convolutional filter.
+- **Stride and padding**: not applicable to the spectral convolution (it is not a
+  sliding-window operation); the pointwise 1×1 convolutions all use `stride=1,
+  padding=0` by construction (a 1×1 kernel has no receptive field to pad or stride
+  across).
+- **Pooling: none, anywhere in this architecture, by deliberate design.** FNO operates
+  at the full 256×256 grid resolution at every layer, from input to output — there is
+  no downsampling/upsampling path. This is not an oversight but a load-bearing
+  architectural property: resolution-independence (Li et al., 2023 — the network can be
+  evaluated at a different grid resolution than it was trained on, since the spectral
+  convolution's mode count is resolution-agnostic) is only possible if the network
+  never ties its weights to a specific spatial resolution the way a pooling/stride-2
+  downsampling path would. The closest functional analogue to a pooling layer is the
+  16×16 Fourier-mode truncation itself — it does discard information (high spatial
+  frequencies beyond mode 16), the same *purpose* a pooling layer serves (capacity
+  control / a form of implicit regularization, §8.4) — but it does so **globally in the
+  frequency domain**, not by locally aggregating neighboring pixels the way max/average
+  pooling does spatially. These are genuinely different operations that happen to serve
+  a structurally similar role, not the same operation under a different name.
 
 ### 4.2 Physics Heads
 
@@ -390,7 +435,7 @@ specifically by the per-month operator framing).
 (Track A's row is the current canonical number, `train_standard_protocol.py`'s
 validated-early-stopping run, 2026-08-22 — superseding this table's original
 0.9406/80-epoch/no-validation entry. B1/B2/B3 are the 2026-08-23
-validation-driven re-run, below. All four rows are now on the same
+validation-driven re-run, §8's note below. All four rows are now on the same
 validation-set-driven protocol.)
 
 **Re-run 2026-08-23 with genuine validation-set-driven early stopping**: each B1/B2
@@ -421,7 +466,7 @@ reasons.
 against both the validation mask and the training mask (no extra rollout cost), giving a
 train-AUC trajectory alongside the existing val-AUC one for every B1/B2/B3 fold/region.
 
-![Train-vs-validation AUC trajectories for Tracks B1, B2, and B3](../CDR_PINN_Data/cdr_pinn_tracks_train_val_auc.png)
+![Train-vs-validation AUC trajectories for Tracks B1, B2, and B3](Physics_Informed_FireRisk_Model/CDR_PINN_Data/cdr_pinn_tracks_train_val_auc.png)
 
 This resolves an ambiguity the Table 5 numbers alone leave open: is the B1/B2 shortfall
 overfitting, or an out-of-distribution transfer failure? Both B1's three folds and B2's six
@@ -567,8 +612,8 @@ checkpoint's 0.9406 — the model is essentially converged well before 80 epochs
 Elevation is the only covariate whose removal meaningfully hurts the model; every
 other removal is noise-level. Elevation alone reaches AUC=0.9399, within 0.0002 of
 the full model — all six other covariates still score above chance in isolation
-(0.59–0.79), so they are not informationally useless, they
-simply add negligible signal on top of what elevation already provides. This is the
+(0.59–0.79), so they are not informationally useless, they simply add negligible
+signal on top of what elevation already provides. This is the
 fifth independent line of evidence for terrain/elevation dominance in this study
 (term-ablation, Step 5a field measurement, permutation importance, response curves,
 and now Jackknife retraining), and completes reproduction of all 3 of Biswas et
@@ -578,7 +623,7 @@ al.'s variable-understanding analyses.
 zero-extra-cost tracking as the B1/B2/B3 diagnostic above, applied here to rule out
 differential overfitting across the 15-run sweep as a confound on the importance ranking.
 
-![Jackknife: final train vs. validation AUC and the train-val gap, all 15 retrains](../CDR_PINN_Data/cdr_pinn_jackknife_train_val_auc.png)
+![Jackknife: final train vs. validation AUC and the train-val gap, all 15 retrains](Physics_Informed_FireRisk_Model/CDR_PINN_Data/cdr_pinn_jackknife_train_val_auc.png)
 
 Every retrain's train$-$val AUC gap falls in a narrow +0.008 to +0.028 band regardless of which
 covariate is held out or held alone, including the `all` baseline (+0.025) and the
