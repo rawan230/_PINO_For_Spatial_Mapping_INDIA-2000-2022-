@@ -19,11 +19,17 @@ is proven, not assumed.
   construction and proofs for each term, the consolidated architecture/training
   design, the full paper draft, methodology section, novelty/comparison argument
   against Biswas, Mahato & Joshi (2025), and reviewer-facing Q&A clarifications.
-- **Headline results**: term-ablation AUC 0.602 (diffusion-only) → 0.941 (full CDR);
+- **Headline results**: term-ablation AUC 0.602 (diffusion-only) → 0.9398 (full CDR,
+  final standard train/val/test protocol, superseding the earlier 0.941/0.9406
+  pre-standard-protocol figures still visible in this study's raw experiment log);
   temporal generalization (leave-years-out) AUC 0.8960; all three of the reference
   paper's variable-understanding analyses (permutation importance, response curves,
-  Jackknife) reproduced, all five independent methods converging on near-total
-  elevation dominance. Full numbers: `Design_and_Paper/CDR_PINN_Full_Paper_Draft.md`.
+  Jackknife) reproduced, six independent methods converging on near-total elevation
+  dominance. A direct physics-vs-no-physics comparison on all four generalization
+  tracks (not just the random split) found no accuracy benefit from the physics
+  constraint anywhere — noise-level on the spatial-block track, a real cost on
+  leave-one-region-out and leave-years-out — a disclosed negative result, not
+  hidden. Full numbers: `Design_and_Paper/CDR_PINN_Full_Paper_Draft.md`.
 
 ---
 
