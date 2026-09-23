@@ -171,14 +171,21 @@ not just weak in absolute terms: RF scores 0.9498 ± 0.0035 and MaxEnt scores 0.
 CDR-PINN — classical ML handles this spatial split comfortably, CDR-PINN does not.
 A matched physics-vs-no-physics comparison on Track A found **no advantage from the
 physics constraint** (no-physics AUC=0.9463 vs. physics AUC=0.9406, pre-standard-
-protocol figures) — a real negative result for the specific claim tested, not yet
-contradicted or confirmed on the harder tracks where the literature predicts the
-advantage should actually appear (Section 5 below states this prediction before the
-test that would confirm it, and that test has not yet been run — the honest state
-of the argument is "not yet empirically closed," not "proven"). Given today's
-spatial-block finding, that remaining test now carries less potential upside than
-when this section was first drafted: even if physics narrows CDR-PINN's own
-no-physics-vs-physics gap on Track B1, RF/MaxEnt's ~0.95 bar is a long way off.
+protocol figures) — a real negative result for the specific claim tested. **Corrected
+2026-09-23**: this section previously said the same comparison on the harder
+B1/B2/B3 tracks "has not yet been run" — that was stale; it was run on 2026-08-22
+(`run_validation_tracks.py`, full numbers in `FULL_EXPERIMENT_LOG.md` §A2c) and
+closes the question unfavorably for the physics constraint on every track tested:
+B1 (spatial-block) physics=0.7595 vs. no-physics=0.7555 (Δ=+0.0041, noise-level, no
+real benefit); B2 (leave-one-region-out) physics=0.5978 vs. no-physics=0.6368
+(Δ=−0.0390, a real cost); B3 (leave-years-out) physics=0.8935 vs. no-physics=0.9059
+(Δ=−0.0123, a real cost). The literature's own prediction (Read et al. 2019;
+Karniadakis et al. 2021) that physics-informed advantages should appear
+specifically under distribution shift does **not** hold for this model on any of
+the three distribution-shift axes tested — the hypothesis is now empirically
+closed, not open, and closed against the physics term. A Track A multi-seed check
+(seeds 42/43/44: 0.9391±0.0017) also confirms Track A's own null result is
+seed-stable, not a lucky draw.
 
 ## 5. Advantages of the PINN/PINO Framework, Argued Directly
 
@@ -196,17 +203,21 @@ no-physics-vs-physics gap on Track B1, RF/MaxEnt's ~0.95 bar is a long way off.
    classifier formulation has an equivalent of, and a genuinely citable methods
    contribution independent of the model's eventual accuracy.
 4. **Data efficiency under physics constraints — argued from the literature, tested
-   once, not yet confirmed for this model.** The PINO paper's own reported result
-   (Li et al., 2023, Table 3) and Read et al. (2019)'s concrete lake-temperature
-   demonstration both show physics constraints improving generalization under data
-   scarcity. This project ran the direct analogue — full-physics vs. no-physics,
-   identical sparse (~2.3% positive) supervision, identical split — and found **no
-   advantage on Track A** (§4a above: no-physics AUC=0.9463 vs. physics AUC=0.9406).
+   directly on all four tracks, and not confirmed for this model on any of them.**
+   The PINO paper's own reported result (Li et al., 2023, Table 3) and Read et al.
+   (2019)'s concrete lake-temperature demonstration both show physics constraints
+   improving generalization under data scarcity. This project ran the direct
+   analogue — full-physics vs. no-physics, identical sparse (~2.3% positive)
+   supervision, identical splits — on all four tracks, not just Track A: Track A
+   found no advantage (no-physics AUC=0.9463 vs. physics AUC=0.9406); the
+   distribution-shift tracks the literature specifically predicts should favor
+   physics instead show a noise-level non-effect (B1, Δ=+0.0041) or a real cost (B2,
+   Δ=−0.0390; B3, Δ=−0.0123) — see `FULL_EXPERIMENT_LOG.md` §A2c for the full table.
    Stated honestly: the *argument* for a structural fit between this framework's
-   known strength and this project's sparse-label problem still holds, but the one
-   test run so far didn't confirm it, and the literature's own prediction is that the
-   effect shows under distribution shift (Tracks B1–B3), not an in-distribution random
-   split — the test that would actually settle this has not yet been run.
+   known strength and this project's sparse-label problem no longer holds
+   empirically for this specific model and training scale — the test the literature's
+   prediction depended on has now been run on every axis available, and the result is
+   a disclosed negative finding, not an open question.
 5. **Resolution-independence — a proven architectural property, not yet empirically
    exercised on this model.** Discretization convergence (§2 above) is a mathematical
    guarantee of the FNO backbone (Li et al., 2023), holding regardless of this

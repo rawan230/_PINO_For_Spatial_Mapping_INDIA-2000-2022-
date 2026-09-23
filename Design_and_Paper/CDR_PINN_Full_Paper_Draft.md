@@ -51,7 +51,11 @@ CDR-PINN scores 0.7510±0.0182 on 2°×2° spatial-block CV versus Random Forest
 0.950±0.003 and MaxEnt's 0.946±0.005 on the same fold scheme, and 0.6187±0.0680 on
 leave-one-region-out (weakest region 0.5387, still above chance). A direct physics-vs-no-physics
 comparison found no accuracy advantage from the physics constraint under
-random-split conditions either. Five independent methods — term-ablation, spatial
+random-split conditions, nor under any of the three distribution-shift tracks
+(B1 Δ=+0.0041, noise-level; B2 Δ=−0.0390; B3 Δ=−0.0123, both real costs — see
+`FULL_EXPERIMENT_LOG.md` §A2c), closing rather than leaving open the literature's
+own prediction that physics-informed advantages should appear under distribution
+shift. Five independent methods — term-ablation, spatial
 fire-point statistics, input-channel permutation, marginal-effect response curves,
 and Biswas et al.'s own Fig. 10 Jackknife retraining test, all three of their
 variable-understanding analyses now reproduced — converge on the same finding:
@@ -800,7 +804,10 @@ yet transfer well to geographically unseen terrain at this training scale. A dir
 physics-vs-no-physics comparison under identical sparse supervision (§4.3) found
 **no accuracy advantage from the physics constraint** on the random-split evaluation
 — the same comparison run on the harder B1/B2/B3 splits, where the literature
-predicts the effect should actually appear, has not yet been performed and is the
+predicts the effect should actually appear, has now been performed (2026-08-22,
+`FULL_EXPERIMENT_LOG.md` §A2c) and closes the question unfavorably: a noise-level
+non-effect on B1 (Δ=+0.0041) and a real cost on B2 (Δ=−0.0390) and B3 (Δ=−0.0123).
+This was previously the
 single most important remaining experiment for this paper's central claim.
 
 **What we do and do not claim as a result.** We do not claim the CDR-PINN currently
@@ -885,10 +892,10 @@ own model relies on most.
    validated against held-out data, and a full nested cross-validation across all of
    them remains future work (§7.2).
 3. **Spatial generalization is weak at this training scale** (Tracks B1/B2, §4.3) —
-   the physics-informed advantage this architecture was motivated to test has not
-   yet been empirically confirmed under spatial distribution shift, and the direct
-   physics-vs-no-physics comparison needed to test it (§5.4) has only been run on
-   Track A so far.
+   the physics-informed advantage this architecture was motivated to test has now
+   been directly tested under spatial (and temporal) distribution shift, not just
+   Track A (§5.4, `FULL_EXPERIMENT_LOG.md` §A2c), and found **absent**: a
+   noise-level non-effect on B1 and a real cost on B2 and B3.
 4. **Data-hunger under sparse labels.** The ~2.3% monthly fire-positive rate
    produced a real, observed optimization failure (the trivial-solution collapse,
    §5.2) before the class-imbalance fix — evidence, not hypothesis, that this

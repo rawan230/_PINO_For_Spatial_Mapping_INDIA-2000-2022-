@@ -493,8 +493,14 @@ significant gain over a plain MLP on Track A). The literature's actual predictio
 (Read et al., 2019; Karniadakis et al., 2021) is that physics-informed advantages
 should appear specifically under distribution shift, not in-distribution accuracy —
 meaning the correct follow-up test is a physics-vs-no-physics comparison run
-specifically on Tracks B1/B2/B3, not yet performed, and the natural next step before
-this claim can be considered either confirmed or closed.
+specifically on Tracks B1/B2/B3. **Corrected 2026-09-23**: this was previously
+described here as "not yet performed" — that was stale; it was run on 2026-08-22
+(`run_validation_tracks.py`, `FULL_EXPERIMENT_LOG.md` §A2c) and the claim is now
+closed, unfavorably: B1 shows a noise-level non-effect (physics=0.7595 vs.
+no-physics=0.7555, Δ=+0.0041), while B2 (Δ=−0.0390) and B3 (Δ=−0.0123) both show a
+real cost from the physics constraint. The literature's prediction that
+physics-informed advantages appear under distribution shift does not hold for this
+model on any tested axis.
 
 **Multi-seed robustness testing** (mirroring Step 8b's protocol) has not yet been
 performed for any CDR-PINN configuration — the numbers above are single-seed
