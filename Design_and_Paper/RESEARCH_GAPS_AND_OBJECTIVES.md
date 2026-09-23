@@ -9,6 +9,41 @@
 
 ---
 
+## At a Glance: Research Gaps → Research Objectives
+
+### Research Gaps (RG)
+
+- **RG1.** Forest-fire susceptibility studies in India [R1, R3, R4] and elsewhere [R5–R7] treat susceptibility as static per-pixel classification. None uses a governing equation for fire behaviour [R2].
+- **RG2.** Predictors are collapsed into whole-period layers that produce one map. Susceptibility therefore has no temporal state and is never tested on unseen years [R1, R8–R11].
+- **RG3.** Physics-informed ML in fire science covers only single-event spread [R15, R16] and pointwise hazard models [R17]. No physics-informed model exists for national fire susceptibility, or for India [R12–R14].
+- **RG4.** Neural operators are benchmarked on synthetic PDE families on flat grids [R18–R21]. They have not been applied to multi-decade observational archives on the sphere.
+- **RG5.** Physics-informed models give no well-posedness guarantee and leave coefficient signs to a soft loss penalty, which is prone to failure [R22–R24].
+- **RG6.** Variable importance is post-hoc and correlational (SHAP, permutation, Jackknife) [R25–R27]. Biswas et al. note that MaxEnt contributions depend on the algorithm's path [R1].
+- **RG7.** Models are evaluated on one random split (Biswas et al.: 70/30, test AUC 0.879). Spatial autocorrelation inflates scores from such splits [R28–R31].
+- **RG8.** National maps use coarse 0.25° snapshot predictors, and land cover serves only as a fire-point filter [R1, R32].
+- **RG9.** Fire-point labels are not validated against an independent burned-area product, and predictor stacks are not audited for leakage [R35–R37].
+- **RG10.** Physics constraints are claimed to improve generalisation [R13, R38], but this has not been tested against tuned classical baselines under distribution shift [R21, R22].
+
+### Research Objectives (RO)
+
+- **RO1 (fills RG1).** To derive, from a susceptibility balance law, a convection–diffusion–reaction (CDR) equation whose diffusion, advection and reaction terms each represent a named fire mechanism and one of Biswas et al.'s predictor groups.
+- **RO2 (fills RG5).** To prove that this equation is globally well-posed over the 266-month record using constants measured from data, and to fix the coefficient signs through the model architecture.
+- **RO3 (fills RG2, RG3, RG4, RG6).** To train the first physics-informed Fourier neural operator for fire susceptibility on 22 years of monthly MODIS data for India, using exact spherical derivatives, and to test each mechanism by term ablation.
+- **RO4 (fills RG2, RG7, RG10).** To evaluate the model on four tracks (random, spatial-block, leave-region-out, leave-years-out) against tuned Random Forest and MaxEnt baselines, and to test whether the physics constraint helps under distribution shift.
+- **RO5 (fills RG8, RG9).** To build a 1 km, month-resolved, leakage-audited predictor stack matching Biswas et al.'s 15 variables, and to validate the fire points against independent burned-area data.
+
+### Key Outcome per Objective
+
+| Objective | Outcome |
+|---|---|
+| RO1 | CDR equation derived; Moran's I = 0.8322 supports the diffusion term; slope is 115% higher at fire locations, which supports the advection term |
+| RO2 | Well-posedness theorem proved; D > 0, ρ ≥ 0 and upslope **v** are guaranteed by the architecture |
+| RO3 | Term ablation AUC: 0.6017 (diffusion) → 0.9239 (+ advection) → **0.9397** (full CDR) |
+| RO4 | Unseen years **0.8960**; spatial-block 0.7510 vs. RF 0.9498 and MaxEnt 0.9465; physics effect negative on 3 of 4 tracks (reported in full) |
+| RO5 | 25× finer grid than Biswas et al.; fire points match burned area (r = 0.915); leakage audit removed the top-3 features |
+
+---
+
 ## 1. Research Objectives of This Study
 
 **Aim.** To replace static, classifier-based forest-fire susceptibility mapping for India with a susceptibility field governed by a derived, provably well-posed physical equation. The field should be resolved in time, decomposable into named mechanisms, and evaluated honestly against the reference study and tuned classical baselines.
