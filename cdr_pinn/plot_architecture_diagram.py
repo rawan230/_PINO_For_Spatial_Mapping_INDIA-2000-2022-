@@ -158,7 +158,7 @@ box(head_boxes_x[1], heads_y, hw, heads_h,
 box(head_boxes_x[2], heads_y, hw, heads_h,
     "ReactionHead\nMLP([dryness, ndvi_f1, slope, dist_roads]):\n4\u219212\u219212\u21921, Tanh\n"
     "$\\rho(x,y,t) = $ softplus(MLP output)\n"
-    "$R = \\rho\\,\\sigma(u)(1-\\sigma(u))$  (Fisher-KPP form)",
+    "$R = \\rho\\,\\sigma(u)(1-\\sigma(u))$  (logistic-type, on the logit $u$)",
     C_PHYSICS, ec=C_PHYSICS_EDGE, fontsize=8.1)
 
 # ---------------------------------------------------------------------- #

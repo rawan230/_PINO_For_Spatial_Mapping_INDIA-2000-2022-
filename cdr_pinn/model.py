@@ -116,8 +116,14 @@ class AdvectionHead(nn.Module):
 
 class ReactionHead(nn.Module):
     """rho(x,y,t) = softplus(rho_net([dryness, NDVI_F1, slope, dist_roads])),
-    Fisher-KPP form R = rho * sigmoid(u) * (1 - sigmoid(u))
-    (CDR_PINN_Reaction_Design.md Sections 1-2)."""
+    R = rho * sigmoid(u) * (1 - sigmoid(u))  (CDR_PINN_Reaction_Design.md Sections 1-2).
+
+    Terminology (audit 2026-09-25): R is added to du/dt where u is the LOGIT. For the
+    probability s = sigmoid(u), ds/dt = s(1-s) du/dt, so the reaction alone gives
+    ds/dt = rho * s^2 * (1-s)^2 -- a logistic-type growth law acting on the logit,
+    NOT the Fisher-KPP term ds/dt = rho * s * (1-s). Describe it as a
+    "logistic-type (Fisher-KPP-inspired) reaction on the logit", never as plain
+    Fisher-KPP."""
 
     def __init__(self, hidden=12):
         super().__init__()
@@ -166,6 +172,10 @@ class CDRPINN(nn.Module):
                       use_diffusion=True, use_advection=True, use_reaction=True):
         """Assemble the single combined CDR residual:
         r = du/dt - D*lap(u) + v.grad(u) - rho*sigma(u)(1-sigma(u))
+        with u the logit. Notes on what is implemented (audit 2026-09-25):
+        diffusion is the NON-conservative D * lap(u), not div(D grad u); the
+        reaction acts on the logit (see ReactionHead); du/dt is a one-month forward
+        difference and all spatial terms use the midpoint state 0.5(u_t + u_{t+1}).
         Time derivative via simple forward difference between consecutive months
         (the per-month operator's own natural time discretization); spatial
         derivatives via the verified spherical spectral operators, evaluated with

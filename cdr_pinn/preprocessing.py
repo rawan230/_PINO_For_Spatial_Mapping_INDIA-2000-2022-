@@ -19,12 +19,18 @@ convention used throughout this project's earlier scripts):
     reclassification). Any script importing this module automatically gets the
     corrected feature -- there's no separate code path for the old one.
 """
+import os
+
 import numpy as np
 import torch
 
 from build_monthly_stacks import LON_MIN, LON_MAX, LAT_MIN, LAT_MAX, TARGET_H, TARGET_W
 
-DATA_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz"
+# The stack every script trains on. Override with the environment variable
+# CDR_PINN_STACK (e.g. to train on a stack written with build_monthly_stacks.py --out).
+DATA_PATH = os.environ.get(
+    "CDR_PINN_STACK",
+    r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz")
 SEED = 42
 VAL_FRAC = 0.15
 TEST_FRAC = 0.20
@@ -57,7 +63,12 @@ def build_masks_3way(ndvi_f1, seed=SEED, val_frac=VAL_FRAC, test_frac=TEST_FRAC)
 
 def load_tensors(device):
     """Loads the monthly-stack npz and returns every tensor a training/eval script
-    needs, keyed by name -- one place to add/rename a covariate, not N places."""
+    needs, keyed by name -- one place to add/rename a covariate, not N places.
+
+    NaN handling (disclosed, audit 2026-09-25): every NaN is replaced by 0 before the
+    tensors are built, i.e. 0 m elevation for the ~0.38% of valid cells without DEM
+    data and 0 dryness for the few cells without FLDAS. Covariates are not otherwise
+    standardised here. Valid (in-India) cells are defined by ~isnan(ndvi_f1)."""
     d = np.load(DATA_PATH)
 
     def t(x):

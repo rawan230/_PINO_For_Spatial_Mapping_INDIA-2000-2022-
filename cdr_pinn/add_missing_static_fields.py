@@ -1,43 +1,50 @@
-"""Adds forest_frac (from the Step 6/7 parquet, same pattern as fire_ever_grid)
+"""Adds forest_frac (from the Step 6 parquet, same rasterisation as fire_ever_frac)
 and grad_e_x/grad_e_y (spherical gradient of the resampled elevation field,
 via the verified spectral_ops) to the existing monthly-stack npz, without
-re-running the expensive NDVI/FLDAS extraction."""
+re-running the expensive NDVI/FLDAS extraction.
+
+Must be run after EVERY build_monthly_stacks.py run (the builder does not write
+these three keys).
+
+Audit 2026-09-25: forest_frac stays the 2001 (pre-fire-period) land-cover fraction.
+The parquet is read through build_monthly_stacks.parquet_column_to_target, i.e. the
+true native NDVI transform + floor-on-edges indexing. The column is looked up by name
+in FOREST_FRAC_COLUMNS order, so a regenerated Step 6 parquet that keeps the
+historical name (forest_frac_baseline) works unchanged.
+"""
+import argparse
+
 import numpy as np
 import torch
-from rasterio.transform import from_bounds
 import pyarrow.parquet as pq
 
 from build_monthly_stacks import (
-    LON_MIN, LON_MAX, LAT_MIN, LAT_MAX, TARGET_H, TARGET_W, TARGET_CRS,
-    PARQUET_PATH, resample_to_target,
+    LON_MIN, LON_MAX, LAT_MIN, LAT_MAX, TARGET_H, TARGET_W,
+    PARQUET_PATH, DEFAULT_OUT_PATH, parquet_column_to_target,
 )
 from spectral_ops import spherical_gradient, neumann_periodic_extend, neumann_periodic_crop
 
-IN_PATH = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz"
-OUT_PATH = IN_PATH  # overwrite with the extended set
+IN_PATH = DEFAULT_OUT_PATH  # r"...\CDR_PINN_Data\cdr_pinn_monthly_stacks.npz"
+# 2001 land-cover forest fraction; first name present in the parquet wins
+FOREST_FRAC_COLUMNS = ("forest_frac_baseline", "forest_frac_2001", "v2_forest_frac_2001")
 
 
 def build_forest_frac_grid():
     # forest_frac_recent (2020) and forest_frac_current (2022) were dropped from Step 6's
     # parquet 2026-08-21 -- both fell inside the 2000-2022 pooled fire label window, a real
     # reverse-causality leakage risk (post-fire LULC reclassification literature). Only
-    # forest_frac_baseline (2001) survives as the sole forest-fraction feature.
-    table = pq.read_table(PARQUET_PATH, columns=["lon", "lat", "forest_frac_baseline"])
-    df = table.to_pandas()
-    native_h, native_w = 3641, 3504
-    native_transform = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, native_w, native_h)
-    inv = ~native_transform
-    cols, rows = inv * (df["lon"].values, df["lat"].values)
-    rows = np.clip(rows.astype(int), 0, native_h - 1)
-    cols = np.clip(cols.astype(int), 0, native_w - 1)
-    grid = np.full((native_h, native_w), np.nan, dtype=np.float32)
-    grid[rows, cols] = df["forest_frac_baseline"].values.astype(np.float32)
-    return resample_to_target(grid, native_transform, TARGET_CRS)
+    # the 2001 baseline survives as the sole forest-fraction feature.
+    names = pq.read_schema(PARQUET_PATH).names
+    col = next((c for c in FOREST_FRAC_COLUMNS if c in names), None)
+    if col is None:
+        raise KeyError(f"none of {FOREST_FRAC_COLUMNS} found in {PARQUET_PATH}")
+    print(f"  using parquet column '{col}'")
+    return parquet_column_to_target(col)
 
 
-def main():
-    print(f"Loading {IN_PATH} ...")
-    d = dict(np.load(IN_PATH))
+def main(path=IN_PATH):
+    print(f"Loading {path} ...")
+    d = dict(np.load(path))
 
     print("Building forest_frac (from Step 6/7 parquet, resampled to target grid)...")
     forest_frac = build_forest_frac_grid()
@@ -62,8 +69,8 @@ def main():
     d["grad_e_x"] = gx.astype(np.float32)
     d["grad_e_y"] = gy.astype(np.float32)
 
-    print(f"Saving extended stack back to {OUT_PATH} ...")
-    np.savez_compressed(OUT_PATH, **d)
+    print(f"Saving extended stack back to {path} ...")
+    np.savez_compressed(path, **d)
     print("Done. New keys:", [k for k in d.keys() if k in ("forest_frac", "grad_e_x", "grad_e_y")])
     print(f"forest_frac range: [{np.nanmin(forest_frac):.4f}, {np.nanmax(forest_frac):.4f}], "
           f"nonzero cells: {(forest_frac > 0).sum()}")
@@ -71,4 +78,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--path", default=IN_PATH, help="stack npz to extend in place")
+    main(ap.parse_args().path)

@@ -3,6 +3,15 @@ Tracks B1 (spatial block CV), B2 (leave-one-region-out), B3 (leave-years-out,
 new), and a physics-vs-no-physics data-efficiency comparison, all against the
 identical full_cdr configuration and data as Track A (train.py).
 
+LEGACY (audit 2026-09-25): kept to reproduce the historical v1 B1/B2 numbers. The
+CANONICAL code for every track is run_unified_protocol.py (one protocol, 3 seeds,
+block-carved validation, leak-free B3, saved predictions). Change made here: the B3
+terminal (LSE-pooled) label is now built from TRAINING (fit) months only -- the
+historical version pooled fire_ever over all 2000-2022 months incl. the held-out test
+years (label leakage), so B3 no longer reproduces the historical 0.8960. Known and
+deliberately NOT changed (to keep B1/B2 bit-exact): pos_weight is computed from
+fire_indicator[:-1] (months 0..T-2) while predictions target months 1..T-1.
+
 Shares model.py/losses.py; reimplements the training loop here (rather than
 importing train.run()) because each track needs a different train/test
 *masking* strategy (spatial pixel masks for B1/B2, temporal month masks for
@@ -133,7 +142,19 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
     if eval_month_mask is None:
         eval_month_mask = np.ones(n_months - 1, dtype=bool)
 
+    # NOTE: [:-1] is off by one month vs the prediction targets (months 1..T-1); kept for
+    # bit-exact reproduction of historical B1/B2. run_unified_protocol.py uses [1:].
     monthly_pos_rate = t_["fire_indicator"][:-1][train_month_mask][:, train_data_mask].mean().item()
+
+    # Terminal (LSE-pooled) label. Spatial splits: fire_ever pooled over 2000-2022 (every
+    # month is a training month there). Temporal split (B3): built from FIT months only
+    # (prediction index ti -> label month ti+1), so held-out and validation years' fires
+    # never enter the training loss (audit 2026-09-25 leakage fix).
+    if is_temporal_split:
+        term_idx = torch.tensor(np.where(train_month_mask)[0] + 1, device=device)
+        terminal_label = (t_["fire_indicator"][term_idx].amax(dim=0) > 0).float()
+    else:
+        terminal_label = t_["fire_ever_frac"]
     pos_weight = (1.0 - monthly_pos_rate) / max(monthly_pos_rate, 1e-6)
 
     def covariate_stack(ti):
@@ -268,7 +289,7 @@ def train_and_eval(ctx, device, train_pixel_mask, test_pixel_mask, tag,
                 window_train_flags = [True] + [bool(train_month_mask[ti]) for ti in range(start, end)]
                 idx = np.where(np.array(window_train_flags))[0]
                 if len(idx) > 1:
-                    window_terminal = data_loss_terminal(traj_stack[idx], t_["fire_ever_frac"], train_data_mask, tau=5.0)
+                    window_terminal = data_loss_terminal(traj_stack[idx], terminal_label, train_data_mask, tau=5.0)
                     window_data = 0.5 * window_data + 0.5 * window_terminal
 
             if use_physics:

@@ -26,6 +26,11 @@ def data_loss_monthly(pred_u, fire_indicator, valid_mask, pos_weight=None):
     """BCE between sigma(u_t) and the sparse monthly fire indicator, masked to
     valid (non-NaN, in-India) pixels only.
 
+    What this is exactly (audit 2026-09-25): a pos-weighted BCE over ALL training
+    cells of the month (`valid_mask` = the training-cell mask). There is NO
+    size-matched negative sampling -- class imbalance is handled only through
+    pos_weight = (1 - p) / p, p = training positive rate.
+
     pos_weight matters a great deal here: the real monthly fire-positive rate is
     only ~2.3% (measured directly from the data). An unweighted BCE's gradient is
     dominated by the 97.7% easy negatives, and was empirically observed (first
@@ -50,8 +55,12 @@ def data_loss_monthly(pred_u, fire_indicator, valid_mask, pos_weight=None):
 
 
 def data_loss_terminal(u_trajectory, fire_ever_frac, valid_mask, tau=5.0):
-    """LSE-pooled sigma(u) over the time dimension, compared against the
-    already-validated Step 6/7 fire_ever (fractional, post-resampling) label."""
+    """LSE-pooled sigma(u) over the time dimension, compared (unweighted BCE) against a
+    terminal label. For spatial tracks that label is the Step 6 fire_ever fraction
+    (fire_ever_frac, pooled over 2000-2022). For a temporal hold-out (Track B3) the
+    caller MUST pass a label built from TRAINING months only -- pooling over all
+    months leaks the held-out years' fires (the historical B3 did; fixed in
+    run_unified_protocol.py and run_validation_tracks.py)."""
     s = torch.sigmoid(u_trajectory)          # (T,H,W) or (B,T,H,W)
     pooled = lse_pool(s, dim=0 if s.dim() == 3 else 1, tau=tau)
     return F.binary_cross_entropy(pooled[valid_mask], fire_ever_frac[valid_mask], reduction="mean")
@@ -62,9 +71,14 @@ def pde_loss(residual, valid_mask):
 
 
 def bc_loss(u_field, lat_rad_1d, dlon_rad, dlat_rad, boundary_mask, R=EARTH_RADIUS_KM):
-    """Homogeneous Neumann: penalize the squared normal derivative at boundary
-    pixels. `boundary_mask` marks the India/non-India edge pixels (a ring
-    around the in-India valid region, not the rectangular grid edge)."""
+    """Boundary penalty intended as a homogeneous-Neumann proxy. What it computes
+    (audit 2026-09-25): the mean of the FULL squared gradient |grad u|^2 on the
+    boundary-ring cells -- not the normal derivative du/dn (no normal vector is
+    formed), so it also penalises the tangential derivative and is stricter than a
+    Neumann condition. `boundary_mask` marks the India/non-India edge pixels (a
+    1-cell ring around the in-India valid region, 1,253 cells on the 256x256 grid).
+    The Neumann (whole-sample-symmetric) extension used for the spectral derivatives
+    is applied at the RECTANGLE edge, not at this ring."""
     u_ext_lon = neumann_periodic_extend(u_field, axis=-1)
     u_ext = neumann_periodic_extend(u_ext_lon, axis=-2)
     n_h = u_ext.shape[-2]
@@ -78,15 +92,22 @@ def bc_loss(u_field, lat_rad_1d, dlon_rad, dlat_rad, boundary_mask, R=EARTH_RADI
 
 
 def ic_loss(u_at_t0):
+    """Initial-condition penalty mean(u_0^2). Every training script hard-sets
+    u_0 = 0 (torch.zeros) before the first window, so this term is IDENTICALLY 0
+    and contributes nothing to the gradient (audit 2026-09-25); it is kept only so
+    the loss-group bookkeeping matches the design documents."""
     return u_at_t0.pow(2).mean()
 
 
 class AdaptiveLossBalancer:
-    """Gradient-norm-balanced loss weighting (Wang, Teng & Perdikaris 2021),
-    already cited in this project's own Step 8 methodology -- reused here
-    rather than fixed hand-picked weights. Rescales each term's weight every
-    `update_every` steps so the terms' gradient norms (w.r.t. shared model
-    parameters) match on average."""
+    """Gradient-norm-balanced loss weighting in the spirit of Wang, Teng &
+    Perdikaris (2021). Exact rule as implemented (audit 2026-09-25): every
+    `update_every` calls (= every 5 training windows in all scripts),
+        g_i  = ||grad_theta L_i||_2            (over all model parameters)
+        w_i <- ema * w_i + (1 - ema) * mean_j(g_j) / g_i,   ema = 0.9
+    i.e. w_i <- 0.9 w_i + 0.1 * mean_norm / norm_i. Weights start at 1 and are
+    NOT normalised afterwards; a term with no gradient (e.g. the identically-zero
+    IC loss) gets g_i = 1e-8 and hence a very large, but inert, weight."""
 
     def __init__(self, names, update_every=1, ema=0.9):
         self.names = list(names)

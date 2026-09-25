@@ -10,11 +10,36 @@ docs (lon [68.20,97.40], lat [6.75,37.09]) -- downsampled via Resampling.average
 Step 4/6's FLDAS and land-cover resampling), not naive/incorrect block-decimation.
 
 Run with --smoke-test first (3 sample months) before the full 266-month build.
+
+Audit corrections (2026-09-24/25, see ../AUDIT_2026-09-25.md):
+  * NDVI months whose pixel_reliability file is missing (2007-03, 2007-04 -- only a
+    partial .crdownload exists) were previously dropped entirely (NaN -> 0 in
+    preprocessing.load_tensors). They are now QA-filtered from the VI_Quality layer
+    instead (MODLAND bits 0-1 in {0,1} AND bit 14 "possible snow/ice" == 0), which
+    reproduces the pixel_reliability {0,1} mask exactly (100.000% pixel agreement,
+    verified on 2007-02 where both layers exist).
+  * Precipitation uses the exact number of days in each month (was a 30-day
+    approximation).
+  * Point -> pixel indexing (fire_ever, forest_frac, monthly fire_indicator) is by
+    explicit floor on pixel EDGES of the true grid transform (the pixel whose
+    footprint contains the point); points outside the grid are dropped, not
+    clipped onto edge cells.
+  * The output path can be redirected (--out); by default an existing v1 stack is
+    first preserved as cdr_pinn_monthly_stacks_v1.npz before being replaced.
+
+STACK PROVENANCE: The published audit results (2026-09-25) used the stack built BEFORE
+these fixes (cdr_pinn_monthly_stacks.npz, sha256 ea7828a5651557c2ad08173c8828788230462c8d29dfebf691fd62c922c5a85d).
+Rebuilding with this version changes the input slightly (2007-03/04 NDVI no longer
+all-NaN, exact-day precipitation, true native transform for fire_ever/forest_frac --
+e.g. 9,170 vs 9,161 fire_ever>0 cells), and all CDR-PINO results would need re-running.
+Do NOT rebuild the stack if you want to reproduce the published numbers; use
+build_monthly_stacks.py --out <other path> + CDR_PINN_STACK=<other path> to experiment.
 """
 import argparse
 import glob
 import os
 import re
+import shutil
 import numpy as np
 import pandas as pd
 import rasterio
@@ -42,6 +67,13 @@ TERRAIN_DIR = r"D:\FOREST FIRE MAPPING(INDIA)\Terrain_Elevation_Slope_Aspect_Ana
 ACCESS_DIR = r"D:\FOREST FIRE MAPPING(INDIA)\Distance_Roads_Railways_Waterways_Analysis\Accessibility_Outputs"
 
 OUT_DIR = r"D:\FOREST FIRE MAPPING(INDIA)\Physics_Informed_FireRisk_Model\CDR_PINN_Data"
+DEFAULT_OUT_PATH = os.path.join(OUT_DIR, "cdr_pinn_monthly_stacks.npz")
+V1_BACKUP_PATH = os.path.join(OUT_DIR, "cdr_pinn_monthly_stacks_v1.npz")
+
+# Native NDVI grid (MOD13A3 1 km, 3641 x 3504). Its true top edge is 37.091667 N, NOT
+# the rounded 37.09 used for the 256x256 target grid, so the native transform is read
+# from a raw file rather than rebuilt with from_bounds().
+NATIVE_H, NATIVE_W = 3641, 3504
 
 
 def doy_to_date(doy_str):
@@ -72,7 +104,9 @@ def resample_to_target(src_array, src_transform, src_crs, resampling=Resampling.
 
 def index_ndvi_files():
     ndvi_files = glob.glob(os.path.join(NDVI_DIR, "MOD13A3.061__1_km_monthly_NDVI_doy*_aid0001.tif"))
+    # glob ends in ".tif", so partial downloads ("*.tif.crdownload") are never matched
     qa_files = glob.glob(os.path.join(NDVI_DIR, "MOD13A3.061__1_km_monthly_pixel_reliability_doy*_aid0001.tif"))
+    viq_files = glob.glob(os.path.join(NDVI_DIR, "MOD13A3.061__1_km_monthly_VI_Quality_doy*_aid0001.tif"))
 
     def date_from_path(p):
         m = re.search(r"doy(\d{7})", os.path.basename(p))
@@ -80,21 +114,42 @@ def index_ndvi_files():
 
     ndvi_by_date = {date_from_path(p).replace(day=1): p for p in ndvi_files}
     qa_by_date = {date_from_path(p).replace(day=1): p for p in qa_files}
-    return ndvi_by_date, qa_by_date
+    viq_by_date = {date_from_path(p).replace(day=1): p for p in viq_files}
+    return ndvi_by_date, qa_by_date, viq_by_date
 
 
-def process_ndvi_month(ndvi_path, qa_path):
+def vi_quality_keep_mask(viq):
+    """Good/marginal mask from the 16-bit VI_Quality layer, for months that lack a
+    pixel_reliability file. MODLAND QA (bits 0-1) in {0 = produced good, 1 = produced,
+    check other QA} AND bit 14 (possible snow/ice) == 0. The fill value 65535 has
+    MODLAND = 3 and is therefore rejected. On months with both layers this mask is
+    identical to pixel_reliability in {0, 1} (verified 2007-02: 100% agreement;
+    MODLAND alone would additionally keep the 133,830 snow/ice pixels = reliability 2)."""
+    viq = viq.astype(np.uint16)
+    return np.isin(viq & 0b11, [0, 1]) & (((viq >> 14) & 1) == 0)
+
+
+def process_ndvi_month(ndvi_path, qa_path=None, viq_path=None):
+    """QA-filtered NDVI for one month, resampled to the target grid.
+    qa_path (pixel_reliability) is preferred; viq_path (VI_Quality) is the fallback."""
     with rasterio.open(ndvi_path) as src:
         raw = src.read(1).astype(np.float32)
         transform, crs = src.transform, src.crs
         nodata = src.nodata
-    with rasterio.open(qa_path) as src:
-        qa = src.read(1).astype(np.float32)
 
     ndvi = raw * 0.0001
     ndvi[raw == (nodata if nodata is not None else -3000)] = np.nan
     ndvi[(ndvi < -0.2) | (ndvi > 1.0)] = np.nan
-    ndvi[~np.isin(qa, [0, 1])] = np.nan  # keep Good(0)/Marginal(1) only
+    if qa_path is not None:
+        with rasterio.open(qa_path) as src:
+            qa = src.read(1).astype(np.float32)
+        ndvi[~np.isin(qa, [0, 1])] = np.nan  # keep Good(0)/Marginal(1) only
+    elif viq_path is not None:
+        with rasterio.open(viq_path) as src:
+            viq = src.read(1)
+        ndvi[~vi_quality_keep_mask(viq)] = np.nan
+    else:
+        raise ValueError(f"no QA layer for {ndvi_path}")
 
     return resample_to_target(ndvi, transform, crs)
 
@@ -115,7 +170,7 @@ def index_fldas_files():
     return out
 
 
-def process_fldas_month(nc_path):
+def process_fldas_month(nc_path, month_ts):
     ds = xr.open_dataset(nc_path)
     ds = ds.sel(Y=slice(5, 38.5), X=slice(67, 98.5))
     lat = ds["Y"].values
@@ -141,7 +196,9 @@ def process_fldas_month(nc_path):
     p_hpa = psurf_pa / 100.0
     e_hpa = qair * p_hpa / (0.622 + 0.378 * qair)
     rh = np.clip(100.0 * e_hpa / es_hpa, 0, 100).astype(np.float32)
-    precip_mm_month = rainf * 86400.0 * 30.0  # kg/m2/s -> mm/month (30-day approximation, consistent w/ project convention)
+    # kg m-2 s-1 (monthly-mean rate) -> mm/month, using the EXACT number of days in this
+    # calendar month (audit 2026-09-25; previously a 30-day approximation)
+    precip_mm_month = rainf * 86400.0 * float(month_ts.days_in_month)
 
     variables = {
         "tair_k": tair_k, "wind": wind, "rh": rh, "precip_mm": precip_mm_month,
@@ -163,24 +220,54 @@ def process_static_grid(tif_path):
     return resample_to_target(arr, transform, crs)
 
 
-def build_fire_ever_grid():
-    """Resample the already-validated Step 6/7 fire_ever label (native NDVI
-    resolution) down to the target grid via averaging -> a fractional
-    burned-pixel-proportion soft label, reusing real ground truth rather than
-    recomputing a coarser one from scratch."""
+def native_ndvi_transform():
+    """Affine transform of the native MOD13A3 1 km grid, read from a RAW NDVI GeoTIFF
+    (the grid every Step 6 parquet row refers to)."""
+    f = sorted(glob.glob(os.path.join(NDVI_DIR, "MOD13A3.061__1_km_monthly_NDVI_doy*_aid0001.tif")))[0]
+    with rasterio.open(f) as src:
+        assert (src.height, src.width) == (NATIVE_H, NATIVE_W), (src.height, src.width)
+        return src.transform
+
+
+def points_to_rowcol(transform, lon, lat, h, w):
+    """Row/col of the pixel whose FOOTPRINT contains each point: explicit floor on pixel
+    EDGES of the affine transform. (The v1 code used `inv * (lon, lat)` + int
+    truncation, which equals floor only for non-negative pixel coordinates, i.e. for
+    points inside the grid; out-of-grid points were then clipped onto edge cells.)
+    Returns (rows, cols, inside) -- points outside the grid are flagged, never clipped."""
+    cols_f, rows_f = (~transform) * (np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64))
+    rows = np.floor(rows_f).astype(np.int64)
+    cols = np.floor(cols_f).astype(np.int64)
+    inside = (rows >= 0) & (rows < h) & (cols >= 0) & (cols < w)
+    return rows, cols, inside
+
+
+def parquet_column_to_target(column):
+    """Rasterise one per-pixel column of the Step 6 parquet onto the native NDVI grid,
+    then average-resample it to the 256x256 target grid. Parquet lon/lat are native
+    pixel CENTRES (pixel coordinate = k + 0.5), so floor-on-edges recovers each row's
+    own native pixel exactly. (v1 rebuilt the native transform with from_bounds(...,
+    37.09) instead of the true 37.091667 top edge -- a 0.2-pixel offset that happened
+    not to change any row index, but also mis-registered the resample by ~0.2 px.)"""
     import pyarrow.parquet as pq
-    table = pq.read_table(PARQUET_PATH, columns=["lon", "lat", "fire_ever"])
-    df = table.to_pandas()
-    # build a native-resolution grid matching F1_NDVI_QA_mean.tif's transform, then resample
-    native_h, native_w = 3641, 3504
-    native_transform = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, native_w, native_h)
-    inv = ~native_transform
-    cols, rows = inv * (df["lon"].values, df["lat"].values)
-    rows = np.clip(rows.astype(int), 0, native_h - 1)
-    cols = np.clip(cols.astype(int), 0, native_w - 1)
-    grid = np.full((native_h, native_w), np.nan, dtype=np.float32)
-    grid[rows, cols] = df["fire_ever"].values.astype(np.float32)
+    df = pq.read_table(PARQUET_PATH, columns=["lon", "lat", column]).to_pandas()
+    native_transform = native_ndvi_transform()
+    rows, cols, inside = points_to_rowcol(native_transform, df["lon"].values, df["lat"].values, NATIVE_H, NATIVE_W)
+    if not inside.all():
+        print(f"  WARNING: {int((~inside).sum())} parquet rows fall outside the native grid and are dropped")
+    grid = np.full((NATIVE_H, NATIVE_W), np.nan, dtype=np.float32)
+    grid[rows[inside], cols[inside]] = df[column].values[inside].astype(np.float32)
     return resample_to_target(grid, native_transform, TARGET_CRS)
+
+
+def build_fire_ever_grid():
+    """Resample the Step 6 fire_ever label (native NDVI resolution) down to the target
+    grid via averaging -> a fractional burned-pixel-proportion soft label.
+
+    Label provenance: the v1 Step 6 parquet's fire_ever was half-pixel shifted (audit
+    2026-09-25); Step 6 is regenerated with the corrected (containing-pixel) label and
+    this function simply re-reads the same column name from the regenerated parquet."""
+    return parquet_column_to_target("fire_ever")
 
 
 def build_monthly_fire_indicator(month_ts):
@@ -191,24 +278,28 @@ def build_monthly_fire_indicator(month_ts):
     grid = np.zeros((TARGET_H, TARGET_W), dtype=np.float32)
     if len(sub) == 0:
         return grid
-    inv = ~TARGET_TRANSFORM
-    cols, rows = inv * (sub["longitude"].values, sub["latitude"].values)
-    rows = np.clip(rows.astype(int), 0, TARGET_H - 1)
-    cols = np.clip(cols.astype(int), 0, TARGET_W - 1)
-    np.add.at(grid, (rows, cols), 1.0)
+    # containing target-grid cell (floor on pixel edges, same rule as the Step 1/6 label);
+    # out-of-grid points are counted and dropped rather than clipped onto edge cells
+    rows, cols, inside = points_to_rowcol(TARGET_TRANSFORM, sub["longitude"].values, sub["latitude"].values,
+                                          TARGET_H, TARGET_W)
+    _fire_outside[0] += int((~inside).sum())
+    np.add.at(grid, (rows[inside], cols[inside]), 1.0)
     return (grid > 0).astype(np.float32)
+
+
+_fire_outside = [0]
 
 
 # ---------------------------------------------------------------------- #
 # Main
 # ---------------------------------------------------------------------- #
 
-def main(smoke_test):
+def main(smoke_test, out_path=None):
     global _fire_df
     os.makedirs(OUT_DIR, exist_ok=True)
 
     print("Indexing source files...")
-    ndvi_by_date, qa_by_date = index_ndvi_files()
+    ndvi_by_date, qa_by_date, viq_by_date = index_ndvi_files()
     fldas_by_date = index_fldas_files()
     _fire_df = pd.read_csv(FIRE_CSV, usecols=["longitude", "latitude", "year", "month"])
     print(f"  NDVI months found: {len(ndvi_by_date)}, FLDAS months found: {len(fldas_by_date)}")
@@ -225,15 +316,18 @@ def main(smoke_test):
     fire_indicator = np.zeros((n, TARGET_H, TARGET_W), dtype=np.float32)
     month_index = pd.DataFrame({"date": months, "year": [m.year for m in months], "month": [m.month for m in months]})
 
-    missing_ndvi, missing_fldas = [], []
+    missing_ndvi, missing_fldas, viq_fallback = [], [], []
     for i, m in enumerate(months):
         if m in ndvi_by_date and m in qa_by_date:
-            ndvi_stack[i] = process_ndvi_month(ndvi_by_date[m], qa_by_date[m])
+            ndvi_stack[i] = process_ndvi_month(ndvi_by_date[m], qa_path=qa_by_date[m])
+        elif m in ndvi_by_date and m in viq_by_date:
+            ndvi_stack[i] = process_ndvi_month(ndvi_by_date[m], viq_path=viq_by_date[m])
+            viq_fallback.append(m)
         else:
             missing_ndvi.append(m)
 
         if m in fldas_by_date:
-            fvars = process_fldas_month(fldas_by_date[m])
+            fvars = process_fldas_month(fldas_by_date[m], m)
             for k, v in fvars.items():
                 fldas_stacks[k][i] = v
         else:
@@ -244,8 +338,13 @@ def main(smoke_test):
         if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
             print(f"  processed {i+1}/{n} months ({m.date()})")
 
+    if viq_fallback:
+        print(f"NOTE: {len(viq_fallback)} NDVI months QA-filtered from VI_Quality (no pixel_reliability file): "
+              f"{[str(m.date()) for m in viq_fallback]}")
     if missing_ndvi:
         print(f"WARNING: {len(missing_ndvi)} months missing NDVI source file: {[m.date() for m in missing_ndvi][:5]}...")
+    if _fire_outside[0]:
+        print(f"NOTE: {_fire_outside[0]} fire points fall outside the target grid and were dropped")
     if missing_fldas:
         print(f"WARNING: {len(missing_fldas)} months missing FLDAS source file: {[m.date() for m in missing_fldas][:5]}...")
 
@@ -272,6 +371,11 @@ def main(smoke_test):
     # design doc (warmer + lower-humidity + drier-soil + lower-precip anomalies all
     # push dryness UP) -- z-scored per-variable over the whole stack before combining
     # so no single variable's units dominate the sum.
+    # NOTE (audit 2026-09-25): the z-score mean/SD are taken over the WHOLE stack (all
+    # cells, all 2000-2022 months, incl. cells/months later held out for testing). This is
+    # a transductive normalisation of an unlabelled COVARIATE (no fire information enters
+    # it) -- disclosed in the methods, not label leakage -- and is kept unchanged so the
+    # covariate definition matches the audited runs.
     def zscore(a):
         return (a - np.nanmean(a)) / (np.nanstd(a) + 1e-8)
 
@@ -292,8 +396,12 @@ def main(smoke_test):
 
     ndvi_f1 = np.nanmean(ndvi_stack, axis=0)  # whole-period mean, matches F1's own definition
 
-    out_path = os.path.join(OUT_DIR, "cdr_pinn_monthly_stacks_smoketest.npz" if smoke_test
-                             else "cdr_pinn_monthly_stacks.npz")
+    if out_path is None:
+        out_path = os.path.join(OUT_DIR, "cdr_pinn_monthly_stacks_smoketest.npz") if smoke_test else DEFAULT_OUT_PATH
+    if (not smoke_test and os.path.abspath(out_path) == os.path.abspath(DEFAULT_OUT_PATH)
+            and os.path.exists(DEFAULT_OUT_PATH) and not os.path.exists(V1_BACKUP_PATH)):
+        print(f"Preserving the existing (v1) stack as {V1_BACKUP_PATH}")
+        shutil.copy2(DEFAULT_OUT_PATH, V1_BACKUP_PATH)
     np.savez_compressed(
         out_path,
         months=np.array([m.isoformat() for m in months]),
@@ -307,6 +415,9 @@ def main(smoke_test):
     )
     print(f"\nSaved: {out_path}")
     print(f"  ndvi_stack shape: {ndvi_stack.shape}, NaN fraction: {np.isnan(ndvi_stack).mean():.3f}")
+    all_nan = [str(months[i].date()) for i in range(n) if np.isnan(ndvi_stack[i]).all()]
+    print(f"  all-NaN NDVI months: {all_nan if all_nan else 'none'}")
+    print("  NEXT: python add_missing_static_fields.py  (adds forest_frac, grad_e_x, grad_e_y)")
     print(f"  fire_indicator: {fire_indicator.shape}, months with any fire: {(fire_indicator.sum(axis=(1,2))>0).sum()}/{n}")
     print(f"  fire_ever_frac: nonzero cells: {(fire_ever_frac>0).sum()}, max frac: {np.nanmax(fire_ever_frac):.4f}")
     print(f"  dryness_proxy range: [{np.nanmin(dryness_proxy):.3f}, {np.nanmax(dryness_proxy):.3f}]")
@@ -315,5 +426,6 @@ def main(smoke_test):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--out", default=None, help="output npz (default: CDR_PINN_Data/cdr_pinn_monthly_stacks.npz)")
     args = parser.parse_args()
-    main(smoke_test=args.smoke_test)
+    main(smoke_test=args.smoke_test, out_path=args.out)

@@ -12,6 +12,77 @@
 > - **Elevation dominance**: specific to CDR-PINO's 7-covariate model. With the full predictor set, removing terrain changes AUC by −0.0001; Biswas also ranks elevation low (2.4%).
 <!-- AUDIT-UPDATE-2026-09-25 -->
 
+## Current results — unified protocol (audit 2026-09-24/25; code updated 2026-09-25)
+
+**These are the numbers to cite.** Paper numbers come only from the project-level
+`results/FINAL_MANUSCRIPT_NUMBERS.md`.
+
+**How they were produced.** Every CDR-PINO configuration was retrained under **one**
+protocol:
+- AdamW, `ReduceLROnPlateau`, early stopping on validation AUC;
+- validation carved from whole spatial blocks;
+- 3 seeds (42/43/44);
+- 4 physics configurations: none, diffusion, diffusion + advection, full CDR.
+
+The code is [`cdr_pinn/run_unified_protocol.py`](cdr_pinn/run_unified_protocol.py). The
+result files are in [`CDR_PINN_Data/unified/`](CDR_PINN_Data/unified/): per-run
+predictions (`pred_*.npz`), `track_*.json`, `partitions.npz` and `term_magnitudes_*.json`.
+Checkpoints are git-ignored because they total about 820 MB.
+[`cdr_pinn/analyze_unified.py`](cdr_pinn/analyze_unified.py) rebuilds every table below
+from those files; its output goes to `CDR_PINN_Data/unified/analysis/`. Figures come from
+`generate_figures.py --map` and go to `CDR_PINN_Data/unified/figures/`.
+
+**ROC-AUC (mean ± SD over seeds × folds; 12 km cells):**
+
+| Track | No physics | Diffusion | Diff + adv | **Full CDR** | Forest cells, full (no physics) |
+|---|---:|---:|---:|---:|---:|
+| A — random cells | **0.945** ± 0.002 | 0.924 ± 0.005 | 0.939 ± 0.001 | 0.939 ± 0.002 | 0.897 (0.910) |
+| B1 — spatial blocks (3 folds) | 0.724 ± 0.010 | 0.642 ± 0.013 | **0.730** ± 0.004 | 0.718 ± 0.007 | 0.701 (0.702) |
+| B2 — held-out regions (6) | **0.614** ± 0.021 | — | — | 0.570 ± 0.007 | 0.569 (0.635) |
+| B3 — held-out years, leak-free label | **0.904** ± 0.001 | 0.886 ± 0.006 | 0.894 ± 0.001 | 0.893 ± 0.003 | 0.833 (0.848) |
+
+**What the results show:**
+- **No physics configuration improves on the same network without physics.** Paired
+  tests (`PAIRED_physics_vs_nophys.csv`):
+  - Track A, full − none = −0.006, DeLong p < 0.02 for every seed.
+  - B1 and B2: block-bootstrap CIs include 0.
+  - B3: −0.011.
+- **Classical models on the same cells, splits and 7 covariates beat CDR-PINO on every
+  track** (`PAIRED_cdr_vs_classical_same_cells.csv`). RF scores 0.980 (A), 0.974 (B1) and
+  0.959 (B2).
+- **B3 falls below covariate-free persistence baselines** on the same cell-months:
+  - climatological fire frequency 0.908;
+  - seasonal frequency 0.930;
+  - RF with monthly covariates and month 0.972.
+
+  The earlier claim that temporal generalisation is CDR-PINO's advantage is withdrawn.
+- **The trained field does not behave as the PDE describes.** The PDE residual is
+  71–616× the mean |∂u/∂t| (`TERM_MAGNITUDES_summary.csv`). Advection carries 83–98% of
+  the right-hand side and diffusion < 0.4%. In practice the field acts as a static
+  susceptibility map.
+- **Historical numbers reproduce bit-exactly** (0.9398 / 0.7510 ± 0.0182 /
+  0.6187 ± 0.0680 / 0.8960). However, Track A and B1–B3 were separately trained models
+  under different protocols, and the historical B3 label leaked the test period. They are
+  superseded, and the older text below is kept for the record.
+
+**Reproduce:**
+```bash
+cd cdr_pinn
+python analyze_unified.py          # tables from the saved result files (CPU, minutes)
+python generate_figures.py --map   # figures + CDR-PINO susceptibility map (CPU)
+python run_unified_protocol.py     # full retrain of all 102 runs (GPU, ~4.5 GPU-hours)
+```
+Use the `cdr_pinn_env` interpreter (torch + CUDA). The published results used the monthly
+stack with SHA-256 `ea7828a5…`. `build_monthly_stacks.py` now contains two corrections:
+- VI_Quality masking for 2007-03/04;
+- exact days-in-month for precipitation.
+
+Rebuilding the stack therefore changes it slightly, and every CDR-PINO result would then
+need to be re-run.
+
+---
+
+**Historical description (pre-audit; superseded where the audit block above says so).**
 
 **This repository's headline contribution is the CDR-PINN**: a convection-diffusion-
 reaction (CDR) partial differential equation over a latent fire-susceptibility

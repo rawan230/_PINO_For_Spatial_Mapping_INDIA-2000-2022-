@@ -21,3 +21,6 @@ __pycache__/
 *.pyc
 .claude/
 .vscode/
+
+# Unified-protocol runs: checkpoints are large (~100 files); predictions/partitions/JSON are kept
+CDR_PINN_Data/unified/*.pt

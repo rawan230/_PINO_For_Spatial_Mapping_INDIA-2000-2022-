@@ -1,4 +1,13 @@
 """
+AUDIT NOTE (2026-09-25): run_unified_protocol.py is now the CANONICAL training code for
+every track (A, B1, B2, B3), every physics configuration and seeds 42/43/44; its Track A
+"full" config uses the same optimiser/scheduler/early-stopping/split as this script. This
+script is kept unchanged to reproduce the historical single-seed Track A number (test
+AUC 0.9398, bit-exact on the v1 stack). Differences from the unified A_full run: pos_weight
+here uses all months incl. month 0 (unified: prediction months 1..T-1 only), the weight
+decay is read from the search JSON (winner 0.0, same as unified), and no per-cell
+predictions are saved. Quote Step 8 numbers only from the unified runs.
+
 The STANDARD training protocol for CDR-PINN -- supersedes the ad-hoc train.py (no
 validation set, no regularization search, no adaptive LR, no loss-curve diagnostics)
 and the earlier train_standard_protocol.py draft (fixed cosine schedule, no

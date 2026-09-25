@@ -1,0 +1,22 @@
+{
+ "audit_date": "2026-09-24",
+ "code_commit": "cd1d298fcc042a7477effc8a6af5b294d090f8fb",
+ "data": "D:\\FOREST FIRE MAPPING(INDIA)\\Physics_Informed_FireRisk_Model\\CDR_PINN_Data\\cdr_pinn_monthly_stacks.npz",
+ "data_sha256": "ea7828a5651557c2ad08173c8828788230462c8d29dfebf691fd62c922c5a85d",
+ "torch": "2.11.0+cu128",
+ "python": "3.11.15",
+ "gpu": "NVIDIA RTX PRO 4500 Blackwell",
+ "protocol": {
+  "window": 24,
+  "epochs": 80,
+  "width": 32,
+  "layers": 4,
+  "modes": 16,
+  "lr": 0.001,
+  "weight_decay": 0.0,
+  "optimizer": "AdamW",
+  "scheduler": "ReduceLROnPlateau(val BCE, factor .5, patience 2 checks)",
+  "early_stop": "val AUC, check every 5 ep, patience 4 checks",
+  "split_seed": 42
+ }
+}
