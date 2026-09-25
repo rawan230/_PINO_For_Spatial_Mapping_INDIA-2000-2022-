@@ -1,1227 +1,923 @@
-# A Physics-Informed Neural Operator for Forest-Fire Susceptibility Mapping in India: A Convection–Diffusion–Reaction Formulation
+# Does a Governing Equation Help? A Controlled Evaluation of a Convection–Diffusion–Reaction Physics-Informed Neural Operator for Forest-Fire Susceptibility Mapping in India (2000–2022)
 
-<!-- AUDIT-UPDATE-2026-09-25 -->
-> ### Audit update (2026-09-25)
-> A full end-to-end audit recalculated every step from raw data and re-ran every model (`results/FULL_METHODOLOGY_AUDIT.md`).
-> Take paper numbers **only** from `results/FINAL_MANUSCRIPT_NUMBERS.md`. The pre-update copy of this file is in
-> `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/CDR_PINN_Full_Paper_Draft.md`. Statements in this document superseded by the audit:
+> **Manuscript draft v2, 2026-09-25 (post-audit rewrite).** This version replaces the
+> 2026-08-20/22 draft in full. It is written as a controlled test of whether physics
+> helps, following the end-to-end audit of 2026-09-24/25.
 >
-> - **'Replicates Biswas's MaxEnt and beats it (0.9576 vs 0.879)'**: 0.9576 cannot be traced to any output, and the comparison is not valid (different population, predictors, labels and AUC definition). A Biswas-style reimplementation gives **0.893 ± 0.009** vs their 0.879 (moderately comparable).
-> - **'Temporal generalisation (B3) is strong / CDR-PINN's advantage'**: withdrawn. Leak-free B3 is 0.893 (3 seeds), which is **below** covariate-free persistence baselines on the same cell-months (0.908; seasonal 0.930). RF with monthly covariates reaches 0.972.
-> - **Term ablation (0.602 / 0.924 / 0.940)**: historical single-seed, fixed-budget runs, with no no-physics arm. Under one validated protocol with 3 seeds: **no physics 0.945, diffusion 0.924, diff + adv 0.939, full 0.939** (Track A). No physics configuration beats no physics on any track.
-> - **Physics vs no physics**: confirmed and extended (3 seeds, paired tests). Full − none: −0.006 (A, p < 0.02 for every seed), CI including 0 (B1, B2), −0.011 (B3).
-> - **'RF 0.950 vs CDR 0.751 on the same fold scheme'**: not the same folds, grid, label or features. On CDR-PINO's own cells, splits and covariates, RF scores **0.974** (B1), 0.959 (B2) and 0.980 (A), vs CDR-PINO 0.719 / 0.570 / 0.939.
-> - **CDR-PINO historical numbers** (0.9398, 0.7510 ± 0.0182, 0.6187 ± 0.0680, 0.8960) reproduce bit-exactly. Under the unified protocol (3 seeds), full CDR scores 0.939 / 0.719 / 0.570 / 0.893 (A / B1 / B2 / B3), and Track A and B1–B3 were separate models trained under different protocols.
-> - **Elevation dominance**: specific to CDR-PINO's 7-covariate model. With the full predictor set, removing terrain changes AUC by −0.0001; Biswas also ranks elevation low (2.4%).
-> - **'Fisher–KPP reaction'**: a misnomer. The reaction ρσ(u)(1−σ(u)) acts on the logit u, which is equivalent to ds/dt = ρs²(1−s)² for s = σ(u).
-> - **Loss-weight formula**: the code uses w_i ← 0.9 w_i + 0.1 · mean‖∇L‖/‖∇L_i‖ every 5 windows, not the multiplicative form stated.
-> - **Zero-shot super-resolution, resolution independence and instance-wise fine-tuning**: not evaluated. Present them as future work only.
-> - **Feature count**: the v1 parquet has **57** features (61 columns). v2 has 55 (a different set).
-> - **22 land-cover fractions** come from the 2020 map, inside the label window. v2 uses the 2001 map; the measured leakage effect is small.
-> - **RF 0.9704 / MaxEnt 0.9598** reproduce exactly (v1, all pixels). v2: RF 0.975 all / **0.897 forest pixels** (the primary population, because forest fraction alone gives AUC 0.91).
-<!-- AUDIT-UPDATE-2026-09-25 -->
-
-
-> **Manuscript draft — 2026-08-20.** Assembles this project's already-completed work
-> (8-step classical pipeline + CDR-PINN design, implementation, and a first
-> term-ablation validation) into a submission-shaped structure, citing this session's
-> newly-verified literature throughout. Sections point to the project's own detailed
-> design/methodology documents rather than re-deriving proofs already written up —
-> consistent with how this whole document set has been built. Citation tags
-> (`[cite-confirmed]`, `[cite-verify]`) follow this project's own established
-> convention (`METHODOLOGY.md`): confirmed means an independently checked DOI/record;
-> verify means found but not every bibliographic detail independently re-confirmed by
-> me directly (as opposed to the research pass that found it).
+> - **Sources.** Every number is taken from `results/FINAL_MANUSCRIPT_NUMBERS.md` or from the
+>   audit result files it cites (`results/final/*.csv`, `results/FULL_METHODOLOGY_AUDIT.md`).
+> - **Earlier drafts.** The previous draft is in the git history and in
+>   `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/`.
+> - **Citation tags.** `[cite-confirmed]` marks references whose records were independently
+>   checked in an earlier literature pass. `[cite-verify]` marks standard references added in
+>   this rewrite whose bibliographic details still need a final check before submission.
+>
+> **Alternative titles:**
+> 1. *Physics-Informed Neural Operators for National-Scale Forest-Fire Susceptibility:
+>    A Controlled Test over India*.
+> 2. *When Physics Does Not Help: Controlled Evidence from a Convection–Diffusion–Reaction
+>    Neural Operator for Forest-Fire Susceptibility in India*.
 
 ---
 
 ## Abstract
 
-*(Drafted to the complete Track A/B1/B2/B3 evidence, the forest-fraction leakage fix
-and its full re-verification, the validated standard train/val/test protocol
-(regularization search, adaptive LR, AUC-driven early stopping), and RF/MaxEnt's own
-new spatial-block CV, 2026-08-22 — reported honestly, including the finding that
-turned out unfavorable to this study's own headline model, since that is the
-accurate current state of the work.)* Forest fires in India have grown in frequency
-and
-severity, and existing susceptibility-mapping approaches — including the most recent
-national-scale study, Biswas, Mahato & Joshi (2025) — rely on presence-background
-statistical models (MaxEnt) applied to static, independently-modeled predictor
-rasters, discarding both the spatial continuity of fire spread and the temporal
-structure of a multi-decade observational record. We reformulate forest-fire
-susceptibility as an initial-boundary value problem for a convection–diffusion–
-reaction (CDR) partial differential equation over a latent susceptibility field,
-solved by a physics-informed Fourier neural operator (PINO) trained against 22 years
-(2000–2022) of real, monthly-resolved fire observations across India. Each governing-
-equation term is constructed to correspond to a distinct fire-behavior mechanism —
-vegetation/moisture-driven diffusion, terrain-driven advection, human-ignition-driven
-reaction — mapping directly onto the four non-trivial predictor groups identified in
-the reference MaxEnt study, and we prove global-in-time well-posedness of the
-governing equation. A term-ablation study demonstrates that each mechanism
-contributes measurable, real predictive value under random-split evaluation
-(held-out ROC-AUC: diffusion-only 0.602, +advection 0.924, full CDR 0.940 under a
-validated train/validation/test protocol adopted after this draft's earlier
-0.941 figure), a real gap below classical Random Forest (0.970, hyperparameter-tuned
-via validation) and MaxEnt (0.959) baselines trained on an identical, now-leakage-
-corrected 15-variable-group feature set. A four-track generalization study, however,
-gives a mixed and instructive picture rather than a uniformly favorable one:
-temporal generalization to unseen years is strong (leave-years-out AUC=0.8960), while
-spatial generalization is weak at the training scale evaluated here and — a finding
-this draft adds, closing an earlier apples-to-oranges gap — **remains weak relative
-to classical ML even under a fair, identically-constructed spatial-block comparison**:
-CDR-PINN scores 0.7510±0.0182 on 2°×2° spatial-block CV versus Random Forest's
-0.950±0.003 and MaxEnt's 0.946±0.005 on the same fold scheme, and 0.6187±0.0680 on
-leave-one-region-out (weakest region 0.5387, still above chance). A direct physics-vs-no-physics
-comparison found no accuracy advantage from the physics constraint under
-random-split conditions, nor under any of the three distribution-shift tracks
-(B1 Δ=+0.0041, noise-level; B2 Δ=−0.0390; B3 Δ=−0.0123, both real costs — see
-`FULL_EXPERIMENT_LOG.md` §A2c), closing rather than leaving open the literature's
-own prediction that physics-informed advantages should appear under distribution
-shift. Five independent methods — term-ablation, spatial
-fire-point statistics, input-channel permutation, marginal-effect response curves,
-and Biswas et al.'s own Fig. 10 Jackknife retraining test, all three of their
-variable-understanding analyses now reproduced — converge on the same finding:
-elevation dominates the trained operator almost completely (a single-covariate model
-reaches AUC≈0.94, within 0.002–0.015 of the full 7-covariate model across two
-independent training runs), a mechanistic attribution capability no correlational
-baseline in this literature offers, but also an explicit shortcut-learning caveat
-this study does not resolve. Beyond the six tuning-side interventions already tested
-(evaluation-metric correction, capacity scale-up, an untuned learning-rate schedule,
-causal time-weighting, staged curriculum learning, and an honest validation-selected
-re-test — all landing within a narrow 0.93–0.94 AUC band except scale-up, evidence
-against an under-optimized model and consistent instead with a representation
-ceiling), this draft adopts a genuine, validated training standard throughout: a
-real 65/15/20 train/validation/test split, a validated regularization search
-(explicit weight decay did not help — spectral mode truncation already regularizes
-this architecture sufficiently), an adaptive learning-rate schedule responding to
-observed validation performance, and early stopping selected on validation AUC
-specifically (found to diverge from validation loss for this model, an honest
-methodological finding in its own right). We report these results, including the
-ones unfavorable to our own headline model, without softening; situate them against
-the literature's own prediction that physics-informed advantages should appear
-specifically under distribution shift (now clearly not confirmed on the spatial
-axis, though still genuinely confirmed on the temporal axis); and identify the
-physics-informed neural operator's demonstrated advantage as currently mechanistic,
-falsifiable, and temporally-generalizable rather than raw-accuracy- or
-spatially-superior — a genuine, if partial, contribution against a literature in
-which no comparable ablation or mechanistic account exists.
+Physics-informed machine learning is widely expected to improve environmental prediction
+by embedding a governing equation in the learning objective. This advantage is expected to
+be largest under distribution shift. For forest-fire susceptibility mapping, the claim has
+not been tested under controlled conditions. We build a convection–diffusion–reaction
+(CDR) physics-informed Fourier neural operator (CDR-PINO) for India, trained on 22 years
+(2000–2022) of monthly MODIS fire observations. Its diffusion, advection and reaction
+terms are tied to vegetation–moisture, terrain and human-access covariates.
+
+We test it against three controls:
+- the identical network trained without physics terms;
+- classical models trained on exactly the same cells, splits and covariates;
+- covariate-free persistence baselines.
+
+The comparison uses four evaluation tracks (random, spatial-block, leave-one-region-out and
+unseen-year), three seeds and paired tests. No physics configuration outperformed the same
+network without physics. On the random split, the full CDR model scored ROC-AUC 0.939
+against 0.945 without physics (DeLong p < 0.02 in every seed); on spatial blocks and held-out
+regions the differences were indistinguishable from zero. On the same 12 km cells and
+covariates, a Random Forest reached 0.980 / 0.974 / 0.959 (random / spatial / regional),
+against 0.939 / 0.719 / 0.570 for CDR-PINO. For unseen years, CDR-PINO (0.893) scored below
+climatological (0.908) and seasonal (0.930) fire-frequency baselines. Diagnostics of the
+trained field showed an almost static solution whose PDE residual is 74–616 times its own
+temporal change. The trained operator therefore does not act as a solution of the equation it
+was regularised towards.
+
+These negative results rest on a rebuilt, fully reproducible national pipeline:
+- 541,545 forest-fire points;
+- 55 predictors on a 1/120° grid;
+- a corrected fire label and Seasonal Kendall trend statistics;
+- forest pixels as the primary evaluation population.
+
+On this pipeline a Random Forest reaches ROC-AUC 0.975 over all pixels and 0.897 over forest
+pixels. A reimplementation of the reference MaxEnt protocol reaches 0.893 ± 0.009. Accuracy
+differences are explained by the model family and the predictor set, not by physics.
+
+**Keywords:** forest fire; susceptibility mapping; physics-informed machine learning; Fourier
+neural operator; convection–diffusion–reaction; negative result; spatial cross-validation;
+India; MODIS.
+
+---
 
 ## 1. Introduction
 
 ### 1.1 Motivation
 
-Forest fires are an escalating ecological and economic hazard in India: approximately
-36% of the country's forest cover is classified as susceptible to fire (ISFR 2021,
-cited in Biswas, Mahato & Joshi, 2025 `[cite-confirmed]`), and the frequency of
-detected fire events has risen across the two decades examined by both that study and
-this project's own Step 1 extraction (232,189 events 2001–2010 vs. 243,761 in
-2011–2020, per Biswas et al.'s own reported totals). Accurate, spatially- and
-temporally-resolved susceptibility mapping is a prerequisite for early-warning systems
-and resource allocation, and is the explicit objective of this work.
+Forest fires are an escalating ecological and economic hazard in India. About 36% of
+the country's forest cover is classified as fire-prone (ISFR 2021, cited in Biswas, Mahato &
+Joshi, 2025 `[cite-confirmed]`). National susceptibility maps guide early warning, patrol
+allocation and fuel management. The most recent national study, Biswas et al. (2025), fits a
+MaxEnt presence–background model to 15 static predictors at 0.25° resolution and reports a
+test AUC of 0.879.
 
-### 1.2 Related Work: Forest-Fire Susceptibility Mapping in India
+### 1.2 Susceptibility mapping in India
 
-Beyond the primary reference study (Biswas, Mahato & Joshi, 2025, MaxEnt, national
-scale, 0.25° resolution — see `Biswas et al. Verification` for this project's own
-source-checked audit of that paper's methods and results), a substantial and growing
-body of India-specific susceptibility-mapping literature exists at regional scale,
-spanning a range of statistical and machine-learning methods:
+A substantial regional literature exists alongside the national reference study, using a
+range of statistical and machine-learning methods:
+- **Western Ghats:** AHP with RF, SVM and XGBoost for Goa (Uthappa et al., 2025, *J. Environ.
+  Manage.*, 379:124777 `[cite-confirmed]`); an ANN/RF/MaxEnt/GLM/MARS/GBM ensemble (Kanda Naveen
+  Babu et al., 2023, *For. Ecol. Manage.*, 540:121057 `[cite-confirmed]`).
+- **Tamil Nadu:** MaxEnt (Meraj et al., 2025, *Risk Anal.*, 45(11):3604–3625 `[cite-confirmed]`).
+- **Similipal, Odisha:** tree ensembles (Guria et al., 2025, *Environ. Sci. Pollut. Res.*,
+  32(59):31375–31396 `[cite-confirmed]`).
+- **Southern Mizoram:** six ML methods (Gupta, Shukla & Shukla, 2025, *Environ. Sci. Pollut.
+  Res.*, 32(59):31433–31454 `[cite-confirmed]`).
+- **Northeast India:** ML ensembles (Sarkar et al., 2024, *Ecol. Inform.*, 81:102598
+  `[cite-confirmed]`).
+- **Western Himalaya:** ensemble ML with explainable AI (Hang et al., 2024, *Environ. Technol.
+  Innov.*, 35:103655 `[cite-confirmed]`).
+- **Jammu & Kashmir:** fuzzy-AHP (Malik et al., 2025, *Discover Forests*, 1(1):4
+  `[cite-confirmed]`).
 
-- **Western Ghats / biodiversity hotspot studies**: Uthappa et al. (2025,
-  *J. Environmental Management*, 379:124777 `[cite-confirmed]`) combine AHP with
-  Random Forest, SVM, and XGBoost for Goa; Kanda Naveen Babu et al. (2023, *Forest
-  Ecology and Management*, 540:121057 `[cite-confirmed]`) use an ensemble of ANN, RF,
-  MaxEnt, GLM, MARS, and GBM across 14 conditioning factors for the wider Western
-  Ghats hotspot.
-- **Regional/state-level studies elsewhere in India**: Meraj et al. (2025, *Risk
-  Analysis*, 45(11):3604–3625 `[cite-confirmed]`) report a MaxEnt model for Tamil
-  Nadu (AUC=0.92) using ~19 topo-climatic-anthropogenic predictors; Guria et al.
-  (2025, *Environ. Sci. Pollut. Res.*, 32(59):31375–31396 `[cite-confirmed]`) compare
-  XGBTree, AdaBag, Random Forest, and GBM for Similipal Biosphere Reserve, Odisha
-  (best RF AUC=0.85); Gupta, Shukla & Shukla (2025, *Environ. Sci. Pollut. Res.*,
-  32(59):31433–31454 `[cite-confirmed]`) compare six ML methods for Southern Mizoram;
-  Sarkar et al. (2024, *Ecological Informatics*, 81:102598 `[cite-confirmed]`)
-  ensemble multiple ML models for Northeast India; Hang et al. (2024, *Environmental
-  Technology & Innovation*, 35:103655 `[cite-confirmed]`) integrate ensemble ML with
-  explainable AI for the Western Himalaya; Malik et al. (2025, *Discover Forests*,
-  1(1):4 `[cite-confirmed]`) apply fuzzy-AHP for Poonch, Jammu & Kashmir.
+All of these treat susceptibility as a static, per-location classification problem. Almost all
+evaluate on a single random split.
 
-**What this body of work has in common, and what it lacks**: every study above,
-including the primary reference, treats susceptibility as a *static, per-location*
-classification or density-estimation problem. None incorporates an explicit governing
-equation, a temporal/dynamical formulation, or a physics-based inductive bias — the
-predictor set (however large or well-chosen) enters each model as an undifferentiated
-feature vector. This project's own prior work (Steps 1–7) sits methodologically within
-this same paradigm before the contribution reported here.
+### 1.3 Susceptibility mapping internationally
 
-### 1.3 Related Work: Wildfire Susceptibility Mapping Internationally
+The same paradigm dominates internationally:
+- CNNs in Yunnan (Zhang, Wang & Liu, 2019, *Int. J. Disaster Risk Sci.*, 10(3):386–403
+  `[cite-confirmed]`);
+- RF/ANN in north-east Türkiye (Kantarcioglu, Schindler & Kocaman, 2023, *ISPRS Archives*,
+  XLVIII-M-1-2023:161–167 `[cite-confirmed]`);
+- SHAP-explained ML in İzmir (İban & Aksu, 2024, *Remote Sens.*, 16(15):2842 `[cite-confirmed]`);
+- XGBoost in New South Wales (Zakari, Malik & Ong, 2025, *Nat. Hazards*, 121(13):15331–15357
+  `[cite-confirmed]`);
+- gradient-boosting ensembles in Greece (Symeonidis et al., 2025, *Earth*, 6(3):75
+  `[cite-confirmed]`);
+- Dempster–Shafer uncertainty-aware ML in Iran (Gholamnia et al., 2026, *Spat. Inf. Res.*,
+  34(4):35 `[cite-confirmed]`);
+- driver analysis in Portugal (Santana Neto et al., 2025, *J. Nat. Conserv.*, 86:126956
+  `[cite-confirmed]`).
 
-The same static-classification paradigm dominates internationally. Representative
-recent examples spanning distinct fire-prone regions and methods: Zhang, Wang & Liu
-(2019, *Int. J. Disaster Risk Science*, 10(3):386–403 `[cite-confirmed]`) apply a CNN
-for Yunnan, China (82% validation accuracy); Kantarcioglu, Schindler & Kocaman (2023,
-*ISPRS Archives*, XLVIII-M-1-2023:161–167 `[cite-confirmed]`) compare RF and ANN for
-north-east Türkiye (AUC 0.89/0.88); İban & Aksu (2024, *Remote Sensing*, 16(15):2842
-`[cite-confirmed]`) use SHAP-explainable ML with MODIS active-fire pixels for İzmir,
-Türkiye; Zakari, Malik & Ong (2025, *Natural Hazards*, 121(13):15331–15357
-`[cite-confirmed]`) report XGBoost (F1=0.965) for New South Wales, Australia;
-Symeonidis et al. (2025, *Earth*, 6(3):75 `[cite-confirmed]`) ensemble
-XGBoost/GBM/LightGBM/CatBoost for Greece; Gholamnia et al. (2026, *Spatial Information
-Research*, 34(4):35 `[cite-confirmed]`) use Dempster–Shafer uncertainty-aware ML
-(AUC=0.893) for the Hyrcanian forests, Iran; Santana Neto et al. (2025, *J. Nature
-Conservation*, 86:126956 `[cite-confirmed]`) assess driving variables for Portugal.
-As with the India-specific literature, none of these studies incorporates a governing
-physical equation or a neural-operator architecture.
+Spatially structured validation is recommended precisely because random splits overstate
+transferability for autocorrelated data (Roberts et al., 2017 `[cite-verify]`). It remains the
+exception.
 
-### 1.4 Related Work: Physics-Informed Learning and Its Demonstrated Advantages
+### 1.4 Physics-informed learning, and the claim this paper tests
 
-Physics-informed neural networks (PINNs; Raissi, Perdikaris & Karniadakis, 2019,
-*J. Comput. Phys.*, 378:686–707 `[cite-confirmed]`) embed a governing differential
-equation as a soft constraint in a neural network's training objective. Karniadakis
-et al. (2021, *Nature Reviews Physics*, 3(6):422–440 `[cite-confirmed]`) survey the
-case for this approach: improved generalization under data scarcity, physical
-plausibility guaranteed by construction rather than hoped for, and interpretability
-through mechanistic (not merely correlational) structure. This is not only a
-theoretical claim: Read et al. (2019, *Water Resources Research*, 55(11):9173–9190
-`[cite-confirmed]`) demonstrate it concretely for a structurally similar
-environmental-prediction problem (lake water temperature) — as training data is
-thinned, a purely data-driven RNN's error rises sharply while a physically-constrained
-(energy-conservation) model degrades far more gracefully, precisely the property this
-project's own sparse fire-observation supervision (~2.3% monthly positive rate, see
-Section 5) needs.
+Physics-informed neural networks (PINNs) embed a governing equation as a soft constraint
+(Raissi, Perdikaris & Karniadakis, 2019, *J. Comput. Phys.*, 378:686–707 `[cite-confirmed]`).
+Neural operators such as the Fourier Neural Operator (FNO) and its physics-informed variant
+(PINO) learn solution operators on grids (Li et al., 2023, arXiv:2111.03794 `[cite-confirmed]`).
+FNOs have been used for climate downscaling (Jiang et al., 2023, *JAMES*, 15(7):e2023MS003800
+`[cite-confirmed]`), hydrological ensembles (Sun et al., 2024, *Water Resour. Res.*,
+60(10):e2024WR037555 `[cite-confirmed]`) and global weather forecasting (Kurth et al., 2023,
+*PASC'23* `[cite-confirmed]`).
 
-**Physics-informed methods applied to fire specifically remain rare, and none address
-susceptibility mapping at national scale.** Vogiatzoglou et al. (2025, *Computer
-Methods in Applied Mechanics and Engineering*, 434:117545 `[cite-confirmed]`) use a
-PINN with explicit mass/energy-conservation constraints to learn *parameters* of a
-wildfire rate-of-spread model, validated on the 2002 Troy Fire (California) — a
-forward-simulation, single-event framing, not a susceptibility map. Dabrowski et al.
-(2023, *Spatial Statistics*, 55:100746 `[cite-confirmed]`) use a Bayesian PINN for
-spatio-temporal wildfire data assimilation. Neither uses a neural *operator*
-architecture, and neither is applied to India or to a multi-decade national
-observational record. **This is the specific, precisely-stated gap this work closes**:
-the first — to the best of this project's own literature search — physics-informed
-neural *operator* applied to national-scale forest-fire susceptibility mapping,
-and the first physics-informed fire model of any kind evaluated against India's own
-Biswas et al. (2025) reference study.
+The case made for physics-informed learning has three parts (Karniadakis et al., 2021,
+*Nat. Rev. Phys.*, 3(6):422–440 `[cite-confirmed]`):
+- better generalisation when data are scarce or shifted;
+- physically plausible outputs;
+- mechanistic interpretability.
 
-The Fourier Neural Operator (FNO) architecture underlying the PINO framework used here
-(Li, Zheng, Kovachki et al., 2023, arXiv:2111.03794 `[cite-confirmed]`) is
-independently well-established for spatial environmental prediction: Jiang et al.
-(2023, *J. Advances in Modeling Earth Systems*, 15(7):e2023MS003800 `[cite-confirmed]`)
-use FNO for climate-model super-resolution; Sun et al. (2024, *Water Resources
-Research*, 60(10):e2024WR037555 `[cite-confirmed]`) bridge hydrological ensemble
-simulation with deep neural operators; Kurth et al. (2023, *Proc. PASC'23*,
-DOI:10.1145/3592979.3593412 `[cite-confirmed]`) introduce the Adaptive FNO in
-FourCastNet for global weather forecasting — the same AFNO variant subsequently reused
-for wildfire fuel-density prediction by Caglar et al. (2026, arXiv:2607.06999
-`[cite-verify — preprint, journal record not yet confirmed]`), which also reports
-physics-guided models outperforming purely data-driven baselines, a third concrete
-data point for the Section 1.4 data-efficiency argument, cited with its preprint
-status disclosed rather than presented as peer-reviewed.
+Process-guided models have shown the first property for lake temperature (Read et al., 2019,
+*Water Resour. Res.*, 55(11):9173–9190 `[cite-confirmed]`). For fire, physics-informed methods
+have so far addressed spread and data assimilation, not susceptibility:
+- a PINN has been used to learn rate-of-spread parameters for a single event (Vogiatzoglou et al.,
+  2025, *CMAME*, 434:117545 `[cite-confirmed]`);
+- a Bayesian PINN has been used for spatio-temporal assimilation (Dabrowski et al., 2023,
+  *Spat. Stat.*, 55:100746 `[cite-confirmed]`).
 
-### 1.5 Contributions
+A physics-informed susceptibility model is therefore an open proposition. Susceptibility maps
+already exist and are useful, so the real question is not whether such a model can be built. It
+is whether the governing equation **adds** anything once confounders are removed:
+- network capacity and architecture;
+- predictor choice;
+- the evaluation grid and population;
+- the spatial or temporal structure of the test split.
 
-This paper's contributions, stated precisely against the literature reviewed above
-(§1.2–1.4) — full itemization and evidence in `CDR_PINN_Novelty_Comparison_
-Advantages.md`:
+Answering this needs controls that are usually absent:
+- the identical network without physics;
+- classical models on identical inputs;
+- baselines that use no covariates at all.
 
-1. A convection–diffusion–reaction PDE whose three terms map onto Biswas et al.
-   (2025)'s own four predictor groups, each grounded in a specific, citable
-   fire-behavior mechanism (Rothermel, 1972, upslope acceleration for advection;
-   Fisher, 1937/Kolmogorov–Petrovsky–Piskunov, 1937, logistic reaction-diffusion for
-   the ignition term) and formally proven globally well-posed.
-2. The first physics-informed neural *operator* (not pointwise PINN) applied to
-   wildfire susceptibility mapping, and the first application of any physics-informed
-   method to India specifically.
-3. A term-ablation study with genuine held-out validation demonstrating each physical
-   mechanism's measurable, separable contribution — not asserted from the equation's
-   elegance, evidence given in Section 5.
-4. Full parity with Biswas et al. (2025)'s real 15-variable predictor set (previously
-   verified as 15, not the 11 this project's own earlier documentation had
-   mis-stated — see `Biswas et al. Verification`), at both the pipeline and the
-   trained-model level.
+### 1.5 Research questions
 
-### 1.6 Relationship to Biswas et al. (2025)'s Own Stated Objectives
+- **RQ1.** Does adding diffusion, advection and reaction terms to a neural operator improve
+  held-out discrimination over the same network trained without them, on random, spatial,
+  regional and temporal splits?
+- **RQ2.** How does the operator compare with classical models trained on exactly the same
+  cells, splits and covariates?
+- **RQ3.** On unseen years, does it beat baselines that use no covariates?
+- **RQ4.** Does the trained operator actually behave as a solution of its governing equation?
 
-Because Biswas et al. (2025) is this paper's primary reference and comparison point,
-their own stated research design is represented here directly, not paraphrased, so
-that this study's relationship to it — extension, modification, or departure — is
-traceable term by term. Biswas et al. state their objectives as explicitly threefold
-(their Introduction, p. 4859): *"Firstly, it seeks to identify the forest fire
-occurrence conditioning factors that contribute to the ignition and spread of fires
-across India. Secondly, the study aims to examine the relationships between
-documented forest fire events and the identified conditioning factors... Thirdly, by
-integrating the findings from the previous objectives, the research endeavors to
-develop a comprehensive forest fire occurrence probability map for the entire
-country."* Table below maps each objective to how this study treats it.
+### 1.6 Contributions
 
-| Biswas et al.'s objective | Biswas et al.'s method | This study's treatment |
+1. **A controlled test of physics-informed learning for fire susceptibility.** It covers four
+   physics configurations × four evaluation tracks × three seeds, with paired DeLong and
+   block-bootstrap tests. It includes same-cell classical comparisons and persistence nulls.
+   The answer to RQ1–RQ3 is negative, and the test identifies where the accuracy differences
+   actually come from (§4.7).
+2. **A physical-consistency diagnostic for trained PINOs.** It measures the magnitude of each
+   term and the PDE residual. It shows that a trained CDR operator can score well while its
+   field is effectively static and violates its own equation (RQ4). This is a check that
+   physics-informed hazard models should report.
+3. **A corrected and reproducible national susceptibility pipeline for India.**
+   - It uses 541,545 forest-fire points, 55 predictors and a 1/120° grid.
+   - Every statistic is recalculated from raw data.
+   - Five defects common in this literature are corrected: half-pixel label misregistration,
+     degenerate anomaly-mean predictors, Mann–Kendall tests on seasonal or smoothed series,
+     Moran's I over filled non-study cells, and in-window land-cover predictors.
+   - Forest pixels are evaluated as the primary population, because non-forest pixels are
+     negative by construction.
+4. **A like-for-like position relative to the reference study.** A reimplementation of Biswas
+   et al.'s protocol on this pipeline's data places the reference result in context. It also
+   makes explicit which pixel-level AUCs are, and are not, comparable with it.
+
+---
+
+## 2. Study area and data
+
+**Domain and period.** The study covers India, using the dissolved state-boundary polygon (EPSG:3857 in the source file,
+reprojected to EPSG:4326). The period is 2000-11-01 to 2022-12-15 (266 months), capped by the
+availability of ESA-CCI/C3S land cover.
+
+**Grid.** EPSG:4326, 3,641 × 3,504 pixels at 1/120° (≈ 0.93 km). It contains 4,184,671
+India-mask pixels, of which **4,160,768** analysis pixels have valid NDVI. The **forest
+population** has 2001 forest fraction > 0 (**1,197,538** pixels).
+
+**Fire points.** The source is the MODIS Collection 6.1 active-fire archive (Giglio, Schroeder &
+Justice, 2016 `[cite-verify]`). The filter stages are:
+- bounding box: 2,804,373 → 2,801,347;
+- India polygon: 1,599,471;
+- deduplication on (lon, lat, date): 1,599,466;
+- same-year ESA-CCI/C3S forest classes (13 codes, following Sannigrahi et al., 2018): **541,545**.
+
+Of these, 4.29% have confidence < 30 and 0.21% have type ≠ 0. Filtering on either changes
+ROC-AUC by < 0.001, so all points are kept. Annual counts agree with those derived from Biswas
+et al.'s published shares within +0.5% to +2.4% (r = 0.99996, 2001–2020). India's forest cover
+over the period is 18.3–19.3%.
+
+**Label.** A pixel is positive if it contains at least one forest-fire point over the whole
+period. Points are assigned to their **containing** pixel, `col = ⌊(lon − c)/a⌋`,
+`row = ⌊(lat − f)/e⌋`, where (c, f) is the top-left pixel edge. This gives **268,411** positive
+pixels, with prevalence 6.45% over all pixels and 22.4% over forest pixels. The commonly used
+rule `round((·)/a)` measures against the pixel *edge*. It displaces 74.9% of points into a
+neighbouring pixel, and correcting it raises Random-Forest AUC by +0.006 (all) and +0.011
+(forest).
+
+**Predictors.** Table 1 lists the 55 predictors. They cover all 15 of Biswas et al.'s variable
+groups. Five of those groups come from different products: MOD11A2 instead of MOD11C3 for LST,
+MOD13A3 instead of MOD13C2 for NDVI, and FLDAS instead of GPM/GLDAS for precipitation, soil
+moisture and net longwave radiation. The resolution effect of the LST product was tested and is
+negligible (§4.8).
+
+**Table 1.** v2 predictor set (55 features; dictionary in `results/final/FINAL_FEATURE_DICTIONARY.csv`).
+
+| Group | Source | Features |
 |---|---|---|
-| (1) Identify conditioning factors | MaxEnt permutation importance over 15 static predictors | Same 15 variable groups (full parity, §1.5 item 4), plus a structurally different identification method: term-ablation (§4.2) attributes importance to *physical mechanisms* (diffusion/advection/reaction), and per-covariate permutation importance (§4.4, new to this work) attributes it to individual inputs *within* the trained operator — a finer-grained, mechanism-aware decomposition their single-model permutation test cannot produce |
-| (2) Examine relationships between fire events and conditioning factors | A correlation matrix (Fig. 11) and MaxEnt response curves (marginal-effect plots) | The governing PDE *is* an explicit model of these relationships — e.g., the advection term formalizes the slope/fire relationship as a directional transport mechanism rather than a marginal response curve, and the well-posedness proofs (§3) make the relationships' mathematical structure precise and provable rather than descriptive |
-| (3) Integrate findings into one national probability map | A single static MaxEnt probability surface, five susceptibility classes | A *time-resolved* susceptibility field `u(x,y,t)`, evaluated monthly across 22 years, with an explicit temporal-generalization test (Track B3) their static map has no equivalent of |
+| Vegetation (6) | MOD13A3.061, 1 km monthly | QA-masked mean NDVI; 2001–2020 climatological June NDVI; Seasonal Kendall τ; seasonal Sen slope; CVSI at the MI-optimal lag k* = 8; LISA cluster (India-only, 8 × 8 block means) |
+| Land-surface temperature (6) | MOD11A2.061, 8-day 1 km | 2001–2020 climatological levels of day LST, night LST and DTR; Seasonal Kendall τ of each |
+| Climate (14) | FLDAS Noah (MERRA-2/CHIRPS), 0.1° monthly | Climatological levels and Seasonal Kendall τ of air temperature, specific humidity, relative humidity, wind, precipitation, net longwave radiation and soil moisture |
+| Terrain (4) | SRTMGL3 90 m | Elevation; Horn slope; aspect sin and cos |
+| Accessibility (3) | OpenStreetMap 2022 (Geofabrik) | Euclidean distance to roads, railways and waterways (India-centred equidistant conic) |
+| Land cover (22) | ESA-CCI/C3S 2001 | 21 class fractions + forest fraction |
 
-**Where this study modifies Biswas et al.'s approach outright, stated plainly**: (a)
-replaces their single presence-background statistical model with a physics-informed
-neural operator family, evaluated alongside (not instead of) a direct MaxEnt
-replication on this study's own richer data (§5.3); (b) replaces their one random
-train/test split with a four-track generalization protocol (§4.3); (c) extends their
-static, whole-period predictor rasters into temporally-resolved (monthly anomaly,
-trend, Mann-Kendall significance) features throughout (§1.9 in the Methodology
-document); (d) extends their 0.25° working resolution to a 1 km native pipeline,
-downsampled to 256×256 specifically for the operator (§2). Where this study does
-**not** depart from Biswas et al.: the same 15 conceptual predictor groups, the same
-forest-classification LULC codes (independently corroborated as identical in the
-`Biswas et al. Verification` audit), and the same overarching goal of an
-early-warning-relevant national probability product.
+Three design choices in this table are corrections:
+- **Climate and LST levels.** Climate and LST enter as climatological *levels*, the form Biswas
+  et al. used, not as time-mean anomalies. A time-mean anomaly over a 2001–2020 baseline equals
+  the residue of the 26 out-of-baseline months. It is degenerate: the spatial SD of each level is
+  40–431× that of its anomaly mean.
+- **Land-cover year.** Land-cover fractions come from 2001, before most of the label window.
+- **Distance accuracy.** Distances were checked against exact geodesic distances (n = 3,000):
+  RMSE 0.31, 0.65 and 0.32 km for roads, railways and waterways.
 
-## 2. Study Area and Data
+---
 
-India, `6°–37.5°N, 68°–97.5°E`, Nov 2000–Dec 2022. Full data provenance table
-in `CDR_PINN_Methodology_Section.md` §2; underlying pipeline (fire-point extraction,
-NDVI/LST/FLDAS feature engineering, terrain/accessibility, integration) documented
-step-by-step in `METHODOLOGY.md`.
+## 3. Methods
 
-### 2.1 Preprocessing Pipeline Structure
+### 3.1 Trend and spatial statistics
 
-Presented here in the canonical stage sequence a spatiotemporal susceptibility study
-is expected to name explicitly, rather than only as "Step 1, Step 2, ... Step 6" —
-this project's existing pipeline already performs every stage below, just previously
-without this naming made explicit in one place:
+**Trends.** Per-pixel trends use the Seasonal Kendall test (Hirsch, Slack & Smith, 1982
+`[cite-verify]`), tie-corrected with at least 30 pairs. They use the seasonal Sen slope (Sen,
+1968 `[cite-verify]`) and Benjamini–Hochberg false-discovery-rate control at q < 0.05
+(Benjamini & Hochberg, 1995 `[cite-verify]`). The Mann–Kendall test is not used: it is invalid
+on seasonal monthly series, and more so on a moving-average-smoothed series (here with lag-1
+autocorrelation 0.975).
 
-| Canonical stage | This study's implementation |
-|---|---|
-| Raw spatial + temporal datasets | MODIS FIRMS fire archive, MODIS NDVI/LST, FLDAS Noah LSM, ESA-CCI/C3S land cover, SRTMGL3 DEM, OSM roads/rail/waterways (§1.2's data table) |
-| Spatial harmonization | Every source reprojected onto one common grid (Step 2's NDVI grid, 3641×3504, EPSG:4326, ~1km) and clipped to India's exact dissolved state-boundary polygon (not a bounding box — Steps 1, 3, 4, 5a, 5b, 6, 8, and, as of the 2026-08-21 fix, Step 2 as well) |
-| Temporal harmonization | Fixed study period 2000-11-01 to 2022-12-15 enforced identically across every source; all monthly products keyed on `(year, month)` for direct joins (Step 4's design, reused throughout) |
-| Quality control and missing-data treatment | MODIS QA/pixel-reliability masking (Step 2), FIRMS bbox/polygon/date-range/dedup filtering (Step 1), NaN-propagation through the India mask rather than silent zero-fill |
-| Lagged and cumulative feature engineering | NDVI climatology/anomaly/trend/CVSI with a fire-data-driven optimal lag (Step 2), LST/FLDAS anomaly and Mann-Kendall trend with FDR-corrected significance (Steps 3-4), multi-window forest-fraction (Step 6, corrected 2026-08-21 to use only the pre-fire-period 2001 baseline window, §5.7 item 1 below) |
-| Fire-event labeling and sampling | Step 1's 541,545 real, independently-validated fire points; Step 6's pooled `fire_ever` binary label |
-| Spatiotemporal train/validation/test splitting | Standard protocol adopted 2026-08-21 (§3.4): genuine 65/15/20% split for CDR-PINN and, separately, for RF/MaxEnt (`preprocessing.py` in each model's own folder); spatial-block `GroupKFold` as an additional generalization-robustness axis for all three models (§4.3, §4.8) |
-| Model-specific preprocessing | RF/MaxEnt: raster flattened to a per-pixel table (below). CDR-PINN: raw gridded tensor, resampled to the 256×256 working grid (§3), spatial adjacency preserved |
-| Models | PINO (CDR-PINN, this study's headline contribution) · Random Forest · MaxEnt · [Logistic Regression and XGBoost also run, Step 8's 5-model ladder, §1.5] |
+**Spatial autocorrelation.** Global Moran's I and LISA (Anselin, 1995 `[cite-verify]`) are
+computed on 8 × 8-pixel block means over India cells only, with 999 permutations.
 
-**From raster to two different model inputs.** All upstream products are stacked
-into one 57-band `Integrated_FireRisk_Stack.tif` (Step 6), which is then consumed in
-two structurally different ways by the two model families compared in this paper.
-The classical baselines (Random Forest, MaxEnt) never read a raster directly:
-Step 6 flattens the stack into `Integrated_FireRisk_Pixels.parquet` — one row per
-valid in-India pixel (4,161,009 rows), one column per band — a standard
-raster-to-tabular operation restricted to pixels passing
-`india_mask & ~isnan(ndvi_mean)`. RF/MaxEnt train on this flattened table with
-ordinary `pandas`/`scikit-learn`/`elapid` tooling, with no explicit awareness that
-neighboring rows are geographically adjacent. CDR-PINN, by contrast, consumes the
-**raw gridded tensor** directly, resampled to a 256×256 working grid (§3) — spatial
-adjacency is preserved and architecturally meaningful, since the FNO's spectral
-convolutions mix information according to genuine 2D spatial structure. This
-distinction is the concrete technical mechanism behind the "discards spatial
-continuity" critique of the static-classification paradigm raised in §1.2.
+### 3.2 Classical susceptibility models (1 km)
 
-## 3. Methodology
+**Models.**
+- **Random Forest** (Breiman, 2001 `[cite-verify]`): 200 trees, `max_depth = 25`,
+  `min_samples_leaf = 3` (validated), balanced class weights.
+- **MaxEnt** (Phillips, Anderson & Schapire, 2006 `[cite-verify]`): linear, quadratic, hinge
+  and product features, with β = 4.0 (validated), fitted on 150,000 training rows. A sample-size
+  sensitivity from 50k to 500k rows is reported (§4.8).
 
-Full derivation, architecture, collocation-point taxonomy, training protocol, and
-computational-complexity analysis: `CDR_PINN_Methodology_Section.md`. Governing
-equation, boundary/initial conditions, and well-posedness proofs: `CDR_PINN_Diffusion_
-Design.md`/`_v2.md`, `CDR_PINN_Advection_Design.md`, `CDR_PINN_Reaction_Design.md`,
-`CDR_PINN_Final_Design_STEP_D.md`. Summary for this section:
+**Protocol.**
+- Stratified 65/15/20 train/validation/test split.
+- Imputation fitted on training rows only.
+- Decision thresholds chosen on validation (max-F1).
+- The test set is scored once.
+
+The same models are also trained on Biswas et al.'s 15 predictors (as levels) to separate the
+predictor-set effect from the model-family effect.
+
+### 3.3 The CDR physics-informed neural operator
+
+**Governing equation.** A latent logit field u(x, y, t) evolves as
 
 ```
-∂u/∂t = D(x,y,t)·∇²u  −  v(x,y)·∇u  +  ρ(x,y,t)·σ(u)·(1−σ(u))     in Ω×(0,T]
-∂u/∂n = 0                                                            on ∂Ω×(0,T]
-u(x,y,0) = 0                                                         in Ω
+∂u/∂t = D(x,y,t) ∇²u − v(x,y)·∇u + ρ(x,y,t) σ(u)(1 − σ(u)),     in Ω × (0, T]
 ```
 
-solved by a Fourier Neural Operator (Li et al., 2023), `1,054,613` parameters
-(`width=32`, `4` spectral layers, `16×16` modes), trained as a per-month one-step-ahead
-operator with truncated backpropagation-through-time (24-month windows), a single
-combined PDE residual plus data/boundary/initial loss terms with adaptive
-gradient-norm-balanced weighting (Wang, Teng & Perdikaris, 2021).
+The susceptibility is s = σ(u). The three coefficients come from physics heads:
+- **Diffusion.** D = softplus(D_net[NDVI, forest fraction] − softplus(w)·NDVI anomaly) links
+  diffusion to vegetation and moisture.
+- **Advection.** v = softplus(c)·∇E is upslope transport along the elevation gradient.
+- **Reaction.** ρ = softplus(ρ_net[dryness, NDVI, slope, distance to roads]) links the reaction
+  to ignition pressure.
 
-### 3.1 Well-Posedness — Proof Structure (condensed; full proofs in the design documents)
+Because the reaction acts on the logit, it is **not** a Fisher–KPP term in s: in s it reads
+ds/dt = ρ s²(1 − s)². For the continuous equation with bounded coefficients, the design
+documents show global-in-time existence and uniqueness:
+- uniform parabolicity from D ≥ D_min > 0;
+- Gårding's inequality for the advective perturbation;
+- a globally bounded (≤ ρ_max/4) and globally Lipschitz (constant ρ_max/(6√3)) reaction.
 
-Each term's well-posedness is proven incrementally, extending rather than replacing
-the previous term's result:
+These results concern the equation. §4.6 tests whether the *trained network* satisfies it.
 
-1. **Diffusion alone**: `D=softplus(D_net(...))` bounded in `[D_min,D_max]` by
-   construction (extreme value theorem on a finite MLP over a compact, verified
-   input domain), giving **uniform parabolicity** — the hypothesis Evans (2010) Ch. 7
-   requires for existence/uniqueness of linear parabolic PDEs.
-2. **+ Advection**: the drift term `v·∇u` is a lower-order perturbation of the
-   elliptic principal part; **Gårding's inequality** (proven via Young's inequality,
-   explicit constants `α=D_min/2`, `β=V_max²/(2D_min)`, `V_max` computed from the
-   measured 77.31° maximum slope) is the correct, weaker-than-coercivity condition
-   this extension needs.
-3. **+ Reaction**: the Fisher–KPP term is proven **globally** bounded
-   (`≤ρ_max/4` for any real `u`) and **globally** Lipschitz (exact constant
-   `ρ_max/(6√3)`) — a strictly stronger property than a generic nonlinear reaction
-   term would have (a bare cubic term, for comparison, only guarantees local-in-time
-   existence). Combined with steps 1–2 via a Gronwall inequality, this yields
-   **global-in-time** existence/uniqueness over the full `T=266`-month horizon.
+**Discretisation and architecture.**
+- **Grid.** The operator runs on a 256 × 256 grid (≈ 12 km) with 22,542 valid cells and 266
+  months.
+- **Covariates (7).** NDVI mean, monthly NDVI anomaly, 2001 forest fraction, monthly dryness,
+  slope, distance to roads and elevation.
+- **Backbone.** An FNO with width 32, 4 spectral layers and 16 × 16 retained modes, 1,054,613
+  parameters in total.
+- **Training scheme.** One-step-ahead monthly training with truncated back-propagation over
+  24-month windows.
 
-Every constant above is computed from this study's own verified data extremes, not
-asserted as a generic bound.
+**Losses, as implemented.**
+- **PDE residual.** The residual is
+  r = (u_{t+1} − u_t) − D∇²u + v·∇u − ρσ(u)(1 − σ(u)), evaluated at the midpoint state, with
+  spectral derivatives on a symmetric (Neumann-type) extension.
+- **Data loss.** The data loss is a positive-weighted binary cross-entropy over all training
+  cells. It is mixed 0.5/0.5 with a log-sum-exp-pooled terminal loss over the last window.
+- **Boundary and initial conditions.** The boundary term penalises |∇u|² on the boundary ring,
+  as a proxy for ∂u/∂n = 0. The initial condition u(·, 0) = 0 is imposed exactly, so its loss is
+  zero.
+- **Loss weights.** The weights follow w_i ← 0.9 w_i + 0.1 · mean‖∇L‖/‖∇L_i‖ every five windows
+  (after Wang, Teng & Perdikaris, 2021 `[cite-verify]`).
 
-### 3.2 Baseline Model Selection Rationale
+### 3.4 Controlled evaluation design
 
-Three model families are compared: MaxEnt (Biswas et al.'s own method, directly
-replicated on this study's data, not cited from their reported number), Random
-Forest, and CDR-PINN. XGBoost is not excluded from this study — it appears in the
-model ladder (Table, §4.1) at parity with RF (0.9678 vs. 0.9676, pre-parity-expansion
-numbers), confirming RF's designation as the headline classical baseline reflects
-methodological convention rather than an unexamined choice: RF requires no feature
-scaling across NDVI/LST/LULC's very different units, provides Gini feature
-importance under the same metric used throughout this study's feature-engineering
-narrative (§5.6), and is the single most common baseline in the reviewed regional
-literature (§1.2–1.3), keeping this study's classical comparison point directly
-legible against the field's own convention.
+**Physics configurations.** All four configurations use the same network, data, budget and
+protocol:
+- **none:** data and initial-condition losses only;
+- **diffusion:** adds the PDE residual with the diffusion term only, plus the boundary term;
+- **diffusion + advection:** adds advection to the residual;
+- **full CDR:** adds the reaction term, giving the full equation.
 
-### 3.3 Feature Set — 15 Variable Groups, 58 Engineered Features
+**Tracks.**
 
-Biswas et al.'s 15 predictor variables are represented here not as 15 raw snapshots
-but as their full temporal decomposition (climatology, anomaly, Mann-Kendall trend
-and significance) already established throughout Steps 2–4 of the underlying
-pipeline. Precisely accounted: **31 features** are direct decompositions of the 15
-variable groups (e.g. NDVI alone → 9 features: mean, climatology, anomaly, trend,
-residual, Mann-Kendall τ, the CVSI stress index, LISA cluster, breakpoint threshold;
-each FLDAS climatic variable → anomaly + trend-significance = 2 features); **24
-features** are additional, not present in Biswas et al.'s 15 at all (the full
-22-class ESA-CCI land-cover fractional breakdown and diurnal temperature range).
-Total: **55 features** (+4 non-feature columns — `lon`, `lat`, and the two label
-columns — for 59 parquet columns overall). This is stated explicitly to avoid the
-count being misread as an inflated or incomparable predictor set: the underlying
-variable *groups* are identical to Biswas et al.'s 15; the representation is richer.
-(Was 58 features/62 columns before a 2026-08-21 data-leakage fix removed
-`forest_frac_recent`/`forest_frac_current`/a forest-loss feature — both dropped years
-overlapped the fire label's own 2000–2022 window, a real reverse-causality risk from
-post-fire land-cover reclassification; only `forest_frac_baseline`, 2001, survives.)
+| Track | Held-out unit | Construction |
+|---|---|---|
+| A | random cells | 65/15/20 cell split |
+| B1 | spatial blocks | 2° × 2° blocks, 3 folds |
+| B2 | regions | 6 K-means regions, leave one out |
+| B3 | years | test years 2000, 2008, 2009, 2015; validation years 2001, 2012, 2013, 2020; scored on test cell-months |
 
-### 3.4 Validation Protocol — Scope, and a Since-Corrected Gap
+**Unified protocol.** One protocol is applied to every track:
+- AdamW, learning rate 10⁻³, validated weight decay 0;
+- ReduceLROnPlateau on validation loss;
+- up to 80 epochs, with early stopping on validation AUC (checked every 5 epochs, patience 4
+  checks);
+- validation carved from whole 2° blocks inside the training region on the spatial tracks;
+- for B3, a terminal label built from training months only (the historical label pooled over
+  all years, including test years).
 
-Track A/B1/B2/B3 (§4.3) are a **generalization-robustness** protocol — they estimate
-how well one already-fixed model configuration transfers across random, spatial, and
-temporal held-out splits. They were not, at the time those tracks were run, paired
-with a hyperparameter-selection protocol: the original `width=64` scale-up and
-cosine-learning-rate comparisons (§4.2, §5.5 as originally drafted) used the Track A
-**test**-set AUC directly to decide whether to keep each variant — precisely the kind
-of decision a held-out validation set exists to make without touching the final test
-metric. This was disclosed rather than hidden, and has since been corrected: §4.8
-reports a dedicated train/val/test three-way split (65/15/20%, same seed=42) built
-specifically to redo that comparison honestly, selecting a winner by validation AUC
-only and reporting test AUC once, for the winner alone. The result is not a simple
-confirmation of the original test-based conclusion — see §4.8 for the honest,
-slightly more complicated outcome. The remaining gap: this fix covers only the one
-scale/schedule decision it was built to re-examine, not a full nested
-cross-validation across every architectural choice made in this study (layer count,
-mode count, window length, τ in LSE-pooling, `pos_weight` computation) — those still
-use PINO-paper defaults chosen once, not tuned, and remain future work (§7.2).
+Seeds 42, 43 and 44 vary initialisation and training noise; the fold, region and year
+assignments are fixed.
+
+**Same-cell classical comparison.** RF, MaxEnt and logistic regression are fitted on
+CDR-PINO's own 12 km cells, partitions and 7 covariates. A second set of classical models also
+uses 12 km aggregates of the 55 v2 predictors. The two sets separate predictor effects from
+model effects.
+
+**Persistence nulls for B3.** Two baselines use no covariates:
+- **climatological frequency:** each cell's fire frequency over the training years;
+- **seasonal frequency:** its fire frequency in the same calendar month over the training years.
+
+An RF on monthly covariates, with and without the month, is also reported.
+
+**Statistics.**
+- Paired differences on identical test units use DeLong's test (DeLong, DeLong & Clarke-Pearson,
+  1988 `[cite-verify]`) on Tracks A and B3.
+- On B1 and B2, where test cells are spatially clustered, they use a spatial block bootstrap
+  (123 blocks, 300 resamples).
+- Calibration is reported as the Brier score and the expected calibration error (ECE).
+
+### 3.5 Physical-consistency diagnostic
+
+For trained checkpoints (Track A, seed 42, all four configurations, plus the historical full
+model), we evaluate over all valid cell-months:
+- the mean magnitude of |∂u/∂t|;
+- the mean magnitude of each right-hand-side term;
+- the RMS PDE residual.
+
+A model that has learned a solution of its equation should have a residual small relative to
+|∂u/∂t|. Its temporal change should also be non-trivial, since fire occurrence is strongly
+seasonal.
+
+### 3.6 Reimplementation of the reference protocol
+
+Biswas et al.'s protocol is reimplemented on this pipeline's data as follows:
+- a 0.25° grid of 4,630 cells;
+- the 15 predictors as levels;
+- presences from 2020 forest fires (1,292 cells);
+- MaxEnt with linear, quadratic, hinge and product features and β = 1;
+- 10 random 75/25 presence splits (Biswas et al.'s own counts, 1,830/609, imply 75/25 although
+  the text states 70/30).
+
+This is a reimplementation, not the reference result.
+
+### 3.7 Evaluation populations
+
+Non-forest pixels can never be positive under a forest-fire label. Over all pixels, forest
+fraction alone therefore reaches AUC 0.91. We report every classical metric over all pixels and
+over forest pixels, and treat the forest population as primary. We always state the grid and
+the prevalence next to an AUC.
+
+---
 
 ## 4. Results
 
-### 4.1 Classical Baselines (Steps 7–8, already-established, real, measured)
+### 4.1 National patterns (supporting results)
 
-| Model | ROC-AUC | Average Precision |
+**Trends (Seasonal Kendall, FDR q < 0.05).**
+- **NDVI:** greening in 3,552,278 pixels and browning in 72,305 (median Sen slope +0.0026 yr⁻¹).
+- **Day LST:** cooling in 2,435,163 pixels (median −0.050 °C yr⁻¹).
+- **Night LST:** warming in 2,080,747 pixels (+0.024 °C yr⁻¹).
+- **Diurnal temperature range:** narrowing in 3,273,301 pixels (−0.077 °C yr⁻¹).
+- **FLDAS climate:**
+  - specific humidity increases in 26,373 of 29,056 FLDAS pixels;
+  - air temperature changes significantly in 9,988 (7,620 decreasing).
+
+Mann–Kendall on seasonal data had reported the air-temperature trend as noise. That was an
+artefact of the test.
+
+**Spatial structure.** NDVI's global Moran's I over India cells is 0.9456 (z = 494, p = 0.001).
+
+**Fire–covariate associations.** Fire points lie on steeper slopes than India as a whole
+(12.35° vs 5.72°). They are 38.9% closer to roads and 64.4% closer to waterways than the
+national mean.
+
+### 4.2 Classical models at 1 km
+
+**Table 2.** Classical models, 1 km test set (all pixels | forest pixels). Sources:
+`results/final/FINAL_METRICS.csv`, `CLASSICAL_METRICS.csv`.
+
+| Model / track | ROC-AUC | Average precision |
+|---|---|---|
+| RF v2, random split | **0.975 \| 0.897** | 0.720 \| 0.721 |
+| MaxEnt v2 (150k rows), random split | 0.967 \| 0.866 | 0.663 \| 0.664 |
+| RF, Biswas-15 predictors, random split | 0.970 \| 0.885 | 0.692 \| 0.698 |
+| RF v2, 2° spatial blocks (3 folds) | 0.959 ± 0.014 \| 0.838 ± 0.039 | 0.582 \| 0.583 |
+| MaxEnt v2, 2° spatial blocks | 0.956 ± 0.012 \| 0.828 ± 0.029 | 0.561 \| 0.563 |
+| RF v2, leave one region out (6) | 0.935 ± 0.036 \| 0.782 ± 0.034 | 0.412 \| 0.413 |
+| RF v2, unseen years | 0.965 \| 0.872 | 0.282 \| 0.282 |
+| Persistence null, unseen years | 0.807 \| 0.744 | 0.131 \| 0.146 |
+
+**The forest population matters.**
+- Accuracy drops by 0.08–0.15 AUC on forest pixels, and the forest-pixel ranking is sharper.
+- RF beats MaxEnt by +0.008 over all pixels but by +0.031 over forest pixels (paired DeLong).
+- Spatial and regional hold-out lower forest AUC to 0.838 and 0.782.
+
+**Calibration.** MaxEnt is better calibrated than RF (ECE 0.015 | 0.054 vs 0.064 | 0.219). The
+RF score is therefore a relative ranking, not a probability.
+
+### 4.3 RQ1: physics terms vs the same network without them
+
+**Table 3.** CDR-PINO physics ablation (mean ± SD over seeds × folds; 12 km cells; all cells).
+Source: `results/final/ABLATION_RESULTS.csv`, `SEED_LEVEL_RESULTS.csv`.
+
+| Track | No physics | Diffusion | Diffusion + advection | Full CDR | Full − none (paired) |
+|---|---|---|---|---|---|
+| A: random (prevalence 42%) | **0.945 ± 0.002** | 0.924 ± 0.005 | 0.939 ± 0.001 | 0.939 ± 0.002 | −0.005 / −0.007 / −0.006; DeLong p < 0.02 each seed |
+| B1: spatial blocks | 0.724 ± 0.010 | 0.642 ± 0.013 | **0.730 ± 0.004** | 0.718 ± 0.007 | block-bootstrap CIs include 0 (all seeds) |
+| B2: regions | **0.614 ± 0.021** | — | — | 0.570 ± 0.007 | CIs include 0 (p ≈ 0.06–0.87) |
+| B3: unseen years (prevalence 2.46%) | **0.904 ± 0.001** | 0.886 ± 0.006 | 0.894 ± 0.001 | 0.893 ± 0.003 | −0.010 / −0.009 / −0.014 (replicated) |
+
+**Findings (Fig. B):**
+- **No configuration beats no physics on any track.** Where differences are resolvable (A, B3),
+  the physics terms are *costly*.
+- **Diffusion alone is the worst configuration** on every track where it was run.
+- **Adding advection recovers most of the loss.** This matches its interpretation as a pathway
+  for elevation information (§4.6), not as a spread mechanism.
+- **The same ordering holds on forest cells** (Track A: 0.910 without physics vs 0.897 full;
+  B3: 0.848 vs 0.833).
+- **Cost.** Physics raises training time by 2.3–2.4×.
+- **Leakage check.** Rebuilding the historical leaky B3 label changes AUC by only +0.0006.
+
+### 4.4 RQ2: classical models on identical cells, splits and covariates
+
+**Table 4.** Same 12 km cells, same partitions, same 7 covariates (all cells | forest cells;
+B1/B2 are fold/region means). Source: `bridge_predictions/`, `results/generalization/PAIRED_cdr_vs_classical_same_cells.csv`.
+
+| Track | CDR-PINO full | CDR-PINO none | Logistic regression | MaxEnt | Random Forest |
+|---|---|---|---|---|---|
+| A | 0.939 \| 0.897 | 0.945 \| 0.910 | 0.924 \| 0.874 | 0.958 \| 0.927 | **0.980 \| 0.950** |
+| B1 | 0.719 \| 0.701 | 0.724 \| 0.702 | 0.919 \| 0.869 | 0.950 \| 0.917 | **0.974 \| 0.936** |
+| B2 | 0.570 \| 0.569 | 0.614 \| 0.635 | 0.872 \| 0.835 | 0.845 \| 0.824 | **0.959 \| 0.916** |
+
+**Findings (Fig. C):**
+- **The gap is structural.** On the random split, RF leads CDR-PINO by 0.041. Under spatial and
+  regional hold-out the gap widens to 0.26–0.39.
+- **Even a linear model wins.** Logistic regression on the same seven covariates beats CDR-PINO
+  by 0.20 (B1) and 0.30 (B2).
+- **The weak spatial transfer is the operator's, not the data's.** Adding the other v2 predictors
+  (12 km aggregates) changes the classical results by at most ±0.01 (RF: 0.981, 0.976, 0.953).
+  The covariates are therefore not what limits spatial transfer.
+
+### 4.5 RQ3: unseen years against covariate-free baselines
+
+On the four held-out years, scored per cell-month (prevalence 2.46%):
+- a covariate-free **climatological fire frequency** reaches **0.908** (forest cells 0.857);
+- the **seasonal frequency** (same calendar month) reaches **0.930** (0.920);
+- CDR-PINO reaches 0.893 with full physics and 0.904 without;
+- an RF on the monthly covariates reaches 0.902, and **0.972** when the month is included.
+
+CDR-PINO's unseen-year skill is therefore below what fire persistence alone provides (Fig. D).
+The earlier interpretation of strong temporal generalisation is not supported. Most of the
+temporal signal is seasonality plus location, and a model that encodes the calendar month
+captures it better.
+
+### 4.6 RQ4: does the trained operator solve its equation?
+
+**Table 5.** Term magnitudes of trained Track A checkpoints (seed 42). Source:
+`results/cdr_pino/term_magnitudes_*.json`.
+
+| Configuration | median \|∂u/∂t\| | Advection share of RHS | Reaction share | Diffusion share | RMS residual / mean \|∂u/∂t\| |
+|---|---:|---:|---:|---:|---:|
+| none | 0.0016 | 0.98 | 0.02 | 0.003 | 616 |
+| diffusion | 0.0003 | 0.83 | 0.16 | 0.002 | 224 |
+| diffusion + advection | 0.0002 | 0.83 | 0.17 | 0.0004 | 74 |
+| full CDR | 0.0003 | 0.91 | 0.09 | 0.0004 | 78 |
+
+Every trained configuration shows three features (Fig. G):
+- **An effectively static field.** The median |∂u/∂t| is ≤ 0.002 per month, although fire
+  occurrence is strongly seasonal.
+- **A large residual.** The PDE residual is 74–616× the field's own temporal change.
+- **Negligible diffusion.** The diffusion term is ≤ 0.3% of the right-hand side.
+
+The physics loss therefore does not produce a field that evolves by the equation. The optimiser
+satisfies the data loss with a near-static susceptibility map and absorbs the residual. The
+advection head is the channel through which elevation enters the operator. Within CDR-PINO's
+7-covariate model, removing elevation had the largest effect in the historical single-seed
+Jackknife test (not re-run in the audit), but with the full predictor set
+the terrain group is redundant (−0.0001 AUC, §4.7). The earlier "elevation dominance" was a
+property of the restricted covariate set, not of fire.
+
+### 4.7 Where accuracy differences come from
+
+**Table 6.** Paired ΔAUC decomposition (all | forest pixels unless stated). Source:
+`results/final/CONTRIBUTION_DECOMPOSITION.csv`.
+
+| Source of difference | ΔAUC |
+|---|---|
+| Model family: RF − MaxEnt (Biswas-15 predictors) | +0.025 \| +0.067 |
+| Model family: RF − MaxEnt (v2 predictors) | +0.008 \| +0.031 |
+| Added predictors and engineering: v2 − Biswas-15 (RF) | +0.005 \| +0.012 |
+| Added predictors: v2 − Biswas-15 (MaxEnt) | +0.022 \| +0.048 |
+| Predictor restriction: v2 − CDR's 5 static covariates (RF) | +0.017 \| +0.071 |
+| Trend group (Seasonal Kendall / Sen) | +0.001 \| +0.006 |
+| Land-cover group | +0.003 \| +0.008 |
+| Terrain group | −0.0001 \| −0.0006 (redundant) |
+| Physics terms in CDR-PINO (full − none) | −0.006 (A); CI includes 0 (B1, B2); −0.011 (B3) |
+| Model structure: full CDR-PINO − RF, same cells and covariates | −0.041 (A) |
+
+Accuracy differences in this problem come from the **model family** and the **predictor set**.
+Neither the physics terms nor the operator structure contribute positively (Fig. A).
+
+### 4.8 Sensitivity analyses
+
+Most sensitivities are null or small (`results/final/SENSITIVITY_RESULTS.csv`).
+
+**Null results:**
+- FIRMS confidence and type filters;
+- NDVI QA level (Good-only vs Good + Marginal);
+- LST aggregated to 0.05° (the MOD11C3 resolution): ΔAUC ≤ 0.0002;
+- slope algorithm (Horn vs Zevenbergen–Thorne);
+- slope computed from a 0.25° DEM;
+- the B3 label leakage.
+
+**MaxEnt training size.** Performance rises monotonically but only slightly, from 0.964 | 0.855
+at 50k rows to 0.969 | 0.872 at 500k (Fig. E). Fit time grows as about n^1.6. The RF–MaxEnt gap
+is therefore not a subsampling artefact.
+
+**Slope from a 0.25° DEM.** This has a mean of 0.29° vs 5.72° at 90 m (r = 0.70). It is a
+different quantity, which limits comparability with slope-based findings at coarse resolution.
+
+### 4.9 Relation to the reference study
+
+**Reimplementation (§3.6).** The reimplementation of Biswas et al.'s protocol reaches test AUC
+**0.893 ± 0.009** (range 0.877–0.912; train 0.902 ± 0.003), against their 0.879 test and 0.894
+train. The two are moderately comparable. Their top permutation-importance variables are
+reproduced (Fig. F):
+
+| Variable | This reimplementation | Biswas et al. |
 |---|---:|---:|
-| Random Forest (57-feature, full 15/15 Biswas parity, hyperparameter-tuned via validation) | **0.9704** | 0.7011 |
-| MaxEnt (`elapid`, 57-feature, `beta_multiplier` validated-tuned) | 0.9598 | 0.6275 |
-| Plain MLP (Step 8) | 0.9614 | — |
-| Plain-monotonicity PINN (Step 8) | 0.9613 | — |
+| NDVI | 19.0% | 22.3% |
+| Night LST | 14.3% | 10.1% |
+| Air temperature | 13.2% | 13.1% |
+| Day LST | 8.1% | 9.6% |
+| Slope | 5.8% | 5.6% |
+| Specific humidity | 3.1% | 13.0% (not reproduced) |
+| Elevation | 10.7% | 2.4% |
 
-Random Forest's number reflects a real, validated hyperparameter search (§3.4a) —
-`max_depth=25, min_samples_leaf=3` beat the original literature-default
-`max_depth=20, min_samples_leaf=5` (0.9679 val AUC vs. 0.9704 test AUC for the tuned
-winner) on validation AUC. MaxEnt's `beta_multiplier` was later also validated-tuned
-(`hp_search_maxent.py`, grid {0.5,1.0,1.5,2.5,4.0} by validation AUC) — the grid was
-essentially flat (0.9589–0.9592 validation AUC across the whole range), a genuine
-near-null tuning result rather than a large correction; winner `beta_multiplier=4.0`
-is used above.
+Biswas et al.'s group totals (33.9/26.1/10.8/9.7%) are permutation importance, although they are
+labelled as contribution.
 
-### 4.2 CDR-PINN Term-Ablation Study (new, this work)
+**Comparability of the pixel-level results.** The pixel-level AUCs in Table 2 are **not**
+comparable with the reference AUC. They differ in:
+- population: all or forest pixels vs presence–background cells;
+- resolution: 1 km vs 0.25°;
+- label: pooled 2000–2022 vs 2020 presences;
+- evaluation design.
 
-| Configuration | ROC-AUC | AP | Δ AUC |
-|---|---:|---:|---:|
-| Diffusion only | 0.6017 | 0.6050 | — |
-| + Advection | 0.9239 | 0.9014 | **+0.3222** |
-| + Reaction (full CDR) | **0.9398** | **0.9223** | +0.0159 |
+Earlier claims of "beating" the reference are withdrawn.
 
-Held out on an identical, disjoint 20% random pixel split (`n=4,508`, seed=42) across
-all three configurations and all classical baselines' own respective splits, for
-direct comparability. **Protocol note**: the full-CDR row reflects the final standard
-protocol (§3.4a — genuine 65/15/20 train/val/test split, validated weight decay,
-early stopping on validation AUC); the diffusion-only and +advection rows still
-reflect the original 80/20-split protocol and have not yet been re-run under the
-standard one — the relative story (advection dominates the accuracy gain) is not
-expected to change, but the exact diffusion-only/+advection numbers are disclosed as
-not yet re-verified under the current protocol. Full methodology, the
-diagnosed-and-fixed class-imbalance collapse, and physical interpretation of the
-ablation ordering: `CDR_PINN_Methodology_Section.md` §8, `CDR_PINN_Novelty_
-Comparison_Advantages.md` §4.
+### 4.10 National susceptibility map
 
-### 3.4a Regularization and Hyperparameter Tuning (standard protocol, 2026-08-21/22)
+The final map (`results/final/maps/Susceptibility_RF_v2_score.tif`; Fig. H) is the Track-A RF v2
+score at 1/120°. Five classes use quantile breaks over forest pixels (0.043 / 0.210 / 0.582 /
+0.893). The GeoTIFF is tagged as a *relative score, not a calibrated probability*. The map's mean
+score (0.135) exceeds the prevalence (0.065), and no calibrated uncertainty estimate was
+established.
 
-Closing a real gap disclosed in §3.4: every architecture/training choice in this
-study is now either validated or explicitly disclosed as not yet validated, not
-silently assumed.
-
-- **CDR-PINN weight decay**: AdamW with a validated search over
-  `{0, 1e-5, 1e-4}`, selected by validation AUC. Winner: **0.0** — explicit L2
-  regularization does not help this architecture, consistent with spectral mode
-  truncation (fixed at 16×16 modes) already providing sufficient implicit capacity
-  control (a standard reading in the FNO/PINO literature, Li et al. 2021/2023).
-- **CDR-PINN learning-rate adaptivity**: `ReduceLROnPlateau` (monitors validation
-  loss, halves LR on a 2-check plateau) replaces the earlier one-off fixed
-  cosine-schedule comparison (§4.8) — genuinely responds to observed training
-  dynamics rather than following a shape decided once in advance.
-- **CDR-PINN early stopping**: found empirically that validation BCE loss and
-  validation AUC diverge for this model (loss oscillates with no clear trend across
-  epochs 5–65; AUC rises cleanly and plateaus at epoch 45) — early stopping and
-  checkpoint selection are driven by validation AUC, the metric this paper actually
-  reports and compares across models, not loss. The resulting loss/AUC diagnostic
-  plot (`cdr_pinn_full_cdr_standard_protocol_loss_curve.png`) is the first figure
-  this model has produced in this study.
-- **Random Forest hyperparameters**: small validated grid over `max_depth`/
-  `min_samples_leaf` (§4.1), genuinely improved the result (0.9679→0.9704 val→test
-  AUC for the winner) rather than confirming the untuned default was already optimal.
-- **MaxEnt hyperparameters**: validated grid over `beta_multiplier` (§4.1,
-  2026-08-23) — the grid was essentially flat (0.9589-0.9592 validation AUC across
-  {0.5,1.0,1.5,2.5,4.0}), a genuine near-null tuning result, not a large correction,
-  but a real validated decision rather than an untested default.
-
-### 4.3 Generalization Tracks and Data-Efficiency Test (new, this work)
-
-| Track | Description | AUC |
-|---|---|---:|
-| A | Random split (full CDR, standard protocol) | 0.9398 |
-| B1 | 2°×2° spatial block CV, 3 folds | 0.7510 ± 0.0182 |
-| B2 | Leave-one-region-out, 6 regions | 0.6187 ± 0.0680 |
-| B3 | Leave-years-out (new) | 0.8960 |
-| — | Data-efficiency: no-physics vs. physics (Track A split) | 0.9463 vs. 0.9406 |
-
-**Re-run with genuine validation-set-driven early stopping (2026-08-23)**: B1, B2,
-and B3 previously trained each fold for a fixed epoch budget with no validation-set
-monitoring at all. They have since been re-run carving real validation pixels/years
-out of each fold's own train portion only (the test fold is never touched), tracking
-best validation AUC per fold, and early-stopping (patience=4) on that metric — the
-same selection discipline Track A's standard protocol already used. The table above
-reflects this corrected protocol (B1 per-fold: 0.7768/0.7395/0.7368; B3 test years
-2000/2008/2009/2015, AP=0.1445); only the data-efficiency row above still reflects
-the pre-standard-protocol checkpoint and pre-forest_frac-leakage-fix input data and
-remains disclosed as not yet re-run.
-
-**New this pass — RF/MaxEnt's own spatial-block CV, closing the apples-to-oranges
-gap** (§4.1's classical baselines never had a spatial-generalization number before):
-using the identical 2°×2° `GroupKFold` scheme as Track B1, **Random Forest scores
-0.9498 ± 0.0035 and MaxEnt scores 0.9465 ± 0.0054** — both far above CDR-PINN's own
-0.7510. This is an honest, consequential, not-favorable-to-CDR-PINN result: even
-under a fair spatial-generalization comparison, classical ML clearly outperforms
-CDR-PINN, not just on the random split. The spatial-generalization advantage this
-architecture was designed to test for is not supported by the evidence collected so
-far — temporal generalization (Track B3) remains the one axis where CDR-PINN has a
-genuine, structurally-unique advantage (§5.4, §5.5).
-
-Full table, per-fold breakdown, and epoch-budget disclosures:
-`CDR_PINN_Methodology_Section.md` §8.
-
-### 4.4 Per-Covariate Permutation Importance (new, this work)
-
-A Biswas-et-al.-style permutation-importance test — shuffle one covariate spatially,
-measure the held-out AUC drop — applied to the trained full-CDR operator's seven
-input channels (inference only, no retraining, on the already-trained Track A
-checkpoint):
-
-| Covariate | AUC after permutation | Drop | % of baseline |
-|---|---:|---:|---:|
-| **Elevation** | 0.7131 | **+0.2268** | **24.13%** |
-| Distance to roads | 0.9398 | +0.0000 | 0.00% |
-| Slope | 0.9398 | +0.0000 | 0.00% |
-| Forest fraction | 0.9398 | +0.0000 | 0.00% |
-| NDVI (baseline) | 0.9398 | +0.0000 | 0.00% |
-| Dryness proxy | 0.9398 | −0.0000 | −0.00% |
-| NDVI anomaly | 0.9398 | −0.0000 | −0.00% |
-
-Baseline AUC=0.9398, exactly matching §4.2/§4.3 (confirms correct checkpoint
-loading — this is the current, final standard-protocol checkpoint, re-run against it
-after the forest_frac leakage fix and the protocol change; the conclusion is
-identical to every earlier measurement on this covariate). **Elevation dominates the
-trained operator's forward pass almost
-completely** — every other covariate shows no measurable effect on the prediction
-when shuffled. This is a genuinely striking result, reported exactly as measured,
-with two readings that both belong in the paper:
-
-- **Corroborating**: this is the *second of what becomes five* independent lines of
-  evidence for terrain dominance in this study, alongside the term-ablation's
-  advection-driven +0.322 AUC jump (§4.2), Step 5a's own +115% fire/slope
-  coincidence measurement, the response-curve analysis immediately following (§4.5),
-  and the Jackknife retraining test (§4.6) — five different methods (equation-term
-  ablation, spatial fire-point statistics, input-channel permutation, marginal-effect
-  sweeps, and per-variable retraining) converge on the same conclusion.
-- **A limitation, not just a confirmation**: near-total reliance on a single input
-  channel, to the exclusion of others with real, independently-established
-  predictive content (e.g. NDVI, RF's own top-ranked feature family — §5.6), is
-  also a plausible sign of shortcut learning at this training scale — elevation has
-  the largest absolute dynamic range and geographic structure of any input channel,
-  which may make it disproportionately easy for a modestly-sized, single-seed model
-  to latch onto early in training. This is stated as an open question for further
-  investigation (multi-seed testing, §5.7), not resolved by this single measurement.
-
-### 4.5 Response Curves (Biswas et al.'s Figs. 8/9, reproduced for CDR-PINN)
-
-Beyond permutation importance (§4.4, Biswas et al.'s Table 3 analogue), Biswas et
-al.'s Figs. 8–9 report **response curves** — how predicted suitability changes as
-one variable is swept across its range, holding others at their sample mean. The
-identical methodology, reproduced here for CDR-PINN (inference only, same trained
-checkpoint, all-other-covariates held at their domain mean):
-
-| Covariate | Swept range | Predicted-probability range | Δ (marginal effect) |
-|---|---|---|---:|
-| **Elevation** | 3.94 – 5,459 m | (range swept, see JSON) | **0.4611** |
-| Slope | 0 – 32.6° | 0.3217 – 0.3255 | 0.0037 |
-| Distance to roads | 0 – 154 km | 0.3247 – 0.3273 | 0.0027 |
-| Dryness proxy | −0.41 – 2.50 | (range swept, see JSON) | 0.0002 |
-| Forest fraction | 0 – 1 | 0.3247 – 0.3250 | 0.0002 |
-| NDVI (baseline) | −0.1 – 0.9 | 0.3248 – 0.3250 | 0.0002 |
-
-This is a **third, independent** confirmation of terrain dominance — alongside the
-term-ablation's advection-driven AUC jump (§4.2), Step 5a's own field measurement,
-and the permutation-importance test (§4.4) — obtained via a completely different
-method (a synthetic single-variable sweep, not held-out accuracy or spatial
-shuffling). With this table and the Jackknife retraining test immediately following
-(§4.6), this study now reproduces all three of Biswas et al.'s variable-understanding
-analyses (Table 3 permutation importance, Figs. 8/9 response curves, and Fig. 10
-Jackknife), on an architecture their own methodology was never applied to — full
-methodological parity with the reference study (§1.6), not the 2-of-3 partial
-reproduction disclosed in an earlier draft of this manuscript.
-
-### 4.6 Jackknife Variable Importance (Biswas et al.'s Fig. 10, reproduced)
-
-Unlike §4.4–4.5 (both inference-only, a single trained checkpoint perturbed or
-swept), Biswas et al.'s Jackknife test requires genuine retraining: one model with
-each covariate held at its domain-mean constant field ("without $X$"), and one model
-with every *other* covariate held constant ("only $X$") — 14 retrains across the 7
-covariates, plus an "all variables" model retrained at the same reduced 40-epoch
-budget for a fair, apples-to-apples comparison array (the §4.2–4.5 checkpoint used
-80 epochs). Same architecture and seed=42 as every other CDR-PINN experiment in this
-study. **Re-run 2026-08-23 with genuine validation-set-driven early stopping**: each
-of the 15 retrains now carves validation pixels out of its own train portion only
-(test pixels untouched), tracks best validation AUC, and early-stops with patience=4
-within the 40-epoch budget, rather than training the full budget blind — the same
-correction applied to Tracks B1–B3 (§4.3).
-
-| Covariate | Without-*X* AUC | Drop when removed | Only-*X* AUC | Gain alone (vs. chance) |
-|---|---:|---:|---:|---:|
-| **Elevation** | **0.8027** | **−0.1370** | **0.9399** | **+0.4399** |
-| NDVI (baseline) | 0.9380 | −0.0017 | 0.7177 | +0.2177 |
-| Slope | 0.9365 | −0.0032 | 0.7665 | +0.2665 |
-| Distance to roads | 0.9372 | −0.0025 | 0.7880 | +0.2880 |
-| Forest fraction | 0.9402 | +0.0006 | 0.7233 | +0.2233 |
-| Dryness proxy | 0.9400 | +0.0004 | 0.5903 | +0.0903 |
-| NDVI anomaly | 0.9386 | −0.0010 | 0.5911 | +0.0911 |
-
-All-variables baseline (same 40-epoch budget, now with the same validation-driven
-early stopping): **AUC=0.9397** — a separate number from Track A's full 80-epoch
-standard-protocol figure (0.9398, §4.2/§4.3); the two use different epoch budgets by
-design and are not meant to be conflated. **This table also reflects the corrected
-`forest_frac` input** (post-2026-08-21 leakage fix — `forest_frac_baseline`, 2001,
-not the dropped `forest_frac_recent`). The earlier pre-validation-rerun figures for
-this diagnostic (elevation without/only 0.7503/0.9392; forest_frac only-*X* 0.7011,
-itself already a small revision from the pre-leakage-fix 0.7016) are superseded by
-the table above and kept only as a historical note, not a live comparison. No
-covariate now scores below chance in isolation (the earlier run's `ndvi_anomaly`
-AUC=0.3874 was plausibly an artifact of the old fixed-epoch budget with no
-validation checkpoint selection — `ndvi_anomaly`'s only-*X* AUC under the corrected
-protocol is a normal 0.5911). Three results, all genuinely new relative to §4.4–4.5
-because this is retraining, not perturbation of a fixed model:
-
-- **Elevation is the only covariate whose removal meaningfully hurts the model** —
-  every other "without-$X$" AUC sits within noise of the full-model baseline
-  (0.9365–0.9402), several even nominally *above* it, while elevation's removal costs
-  an order of magnitude more (0.1370). This is the **fifth** independent line of
-  evidence for terrain dominance in this study (§4.4's list, extended), and the first
-  obtained via retraining rather than a fixed checkpoint — now re-confirmed under the
-  more rigorous validation-selected protocol.
-- **Elevation alone very nearly reproduces the full model**: a model trained on
-  elevation as its *only* informative input reaches AUC=0.9399, within 0.0002 of the
-  7-covariate baseline (0.9397) — elevation alone essentially matches it. This
-  sharpens rather than merely repeats the shortcut-learning concern already raised in
-  §4.4 and §5.7 item 10: it is not just that elevation permutation/response-curve
-  tests show large marginal effects, it is that a model given *only* elevation and
-  nothing else learns almost the entire achievable signal at this scale. The other
-  six covariates are not informationally useless in isolation — most "only-$X$"
-  models score meaningfully above chance (0.72–0.79 for slope/roads/NDVI/
-  forest-fraction) — they simply add negligible signal on top of what elevation
-  alone already provides.
-- **The leakage-fix comparison remains a small, useful historical result**: the
-  near-identical pre-/post-leakage-fix `forest_frac` Jackknife numbers recorded
-  before this validation-protocol upgrade (0.7016→0.7011) were evidence the fix was
-  a correctness improvement without materially changing this diagnostic's
-  conclusions; that comparison predates the current re-run and is not repeated here,
-  but the conclusion it supported still stands.
-
-### 4.7 Advanced PINN Techniques Tested: Causal Time-Weighting and Curriculum Learning
-
-Two techniques from the wider PINN literature, chosen because each maps onto a
-specific, already-diagnosed property of this study's training setup rather than
-applied generically:
-
-- **Causal time-weighting** (Wang, Sankaran & Perdikaris, 2022 [cite-verify]):
-  weights each month's residual loss within a training window by
-  $w_i=\exp(-\varepsilon\sum_{k<i}\mathcal{L}_r(k))$, so the optimizer must reduce
-  earlier-month residual before later-month residual is allowed much gradient —
-  directly targeting the explicit 266-month autoregressive structure this study
-  trains over, which had no causal weighting of any kind before this test.
-- **Staged curriculum learning**: rather than all three CDR terms active from epoch
-  1 (every prior run in this study, including the term-ablation checkpoints, which
-  train separate models per term combination rather than unlocking terms
-  progressively within one run), advection is switched on at epoch 15 and reaction
-  at epoch 35 of an 80-epoch run — a principled alternative to the scale/schedule
-  tuning already tried and already ruled out (§5.7 item 8), motivated by the same
-  observed optimization sensitivity.
-
-*(Predates the standard protocol and the forest_frac leakage fix — baseline here is
-the original 0.9406 checkpoint, not the current 0.9398 one; not yet re-run against
-the current checkpoint, disclosed rather than silently left ambiguous.)*
-
-| Configuration | Test AUC | Test AP | vs. baseline (0.9406) |
-|---|---:|---:|---:|
-| Baseline (full CDR, all terms from epoch 1) | 0.9406 | 0.9253 | — |
-| Causal time-weighting ($\varepsilon=1.0$) | 0.9369 | 0.9206 | −0.0037 |
-| Staged curriculum (advection@15, reaction@35) | 0.9343 | 0.9154 | −0.0063 |
-
-Neither improved on the baseline. This is the fourth and fifth consecutive
-optimization-side intervention (after §5.7 item 8's scale-up and LR-schedule tests)
-that fails to beat the original default configuration — an accumulating signal that
-this model's bottleneck is not optimization dynamics but the representation problem
-already identified in §4.4–4.6 (near-total elevation dominance), which no amount of
-retuning *how* the loss is optimized can be expected to fix. One caveat limits how
-strongly this should be read: neither $\varepsilon$ nor the curriculum's unlock
-epochs were swept — a single default value was tried for each, so the honest
-conclusion is "did not help at the tested default," not "ruled out across all
-settings." Wavelet PINNs (Tripura & Chakraborty, 2022 [cite-verify]), PIKANs
-(physics-informed Kolmogorov-Arnold networks), and domain-decomposition PINNs
-aligned with the existing biogeographic-zone infrastructure from Step 2's F9
-breakpoint analysis were also considered against this study's specific diagnosed
-weaknesses (spectral-truncation limitation, item 5; weak Track B2 spatial transfer,
-§5.4) but require substantial architecture changes beyond this study's remaining
-scope, and are recorded as future work (§7.2) rather than attempted without
-sufficient justification. Fourier feature encoding and residual-adaptive domain
-(RAD) sampling were considered and are *not* recommended for this architecture: the
-former targets spectral bias in coordinate-input MLPs, which this FNO backbone does
-not exhibit the same way (it already parameterizes filters directly in frequency
-space); the latter targets sparse-collocation placement, and this study already uses
-dense collocation (every valid pixel, every month) rather than a sparse sampled set.
-
-### 4.8 Validation-Selected Re-Test of the Scale/Schedule Decision
-
-§3.4 disclosed that the original `width=64` scale-up and cosine-LR-schedule
-comparisons used Track A test AUC for selection. This section redoes that
-comparison honestly: a fresh train/val/test split (65/15/20% of valid pixels,
-seed=42 — a different partition than Track A's original 80/20 split, so absolute
-numbers are not directly the same run repeated), all three configurations retrained
-on the same split, winner selected by **validation** AUC only, test AUC reported
-once for the winner and never used in selection.
-
-| Configuration | Val AUC | Test AUC (not used for selection) |
-|---|---:|---:|
-| `width=32`, 80 epochs, cosine schedule | **0.9368** ← selected | 0.9403 |
-| `width=32`, 80 epochs, no schedule | 0.9329 | 0.9370 |
-| `width=64`, 150 epochs, no schedule | 0.9266 | 0.9339 |
-
-Two findings, one confirming the original conclusion and one **reversing** it:
-
-- **Scale-up is robustly worse**, now on a second, independent split (val AUC 0.0102
-  below the small config, test AUC 0.0031–0.0064 below) — the original finding that
-  bigger is not the fix is reinforced, not an artifact of one particular split.
-- **The cosine-schedule finding reverses.** On the original Track A split, cosine
-  scored *worse* than plain (0.9154 vs. 0.9406, `CDR_PINN_Methodology_Section.md`
-  §8.1/§5.7 item 1) and was reported as ruled out. On this independent split,
-  cosine wins on both validation (0.9368 vs.
-  0.9329) and test (0.9403 vs. 0.9370) AUC. All non-scale-up configurations
-  (baseline, causal, curriculum, plain, cosine) cluster within a ~0.93–0.94 AUC band
-  across every split tested — ordinary split-to-split noise at this training scale,
-  not a reliable ranking. **The earlier "LR schedule ruled out" conclusion is
-  retracted to "split-sensitive, unresolved without multi-seed testing"** — an
-  honest correction, not a discarded result: both numbers are real and both are
-  reported (§5.7 item 1, revised).
-
-Read together with §4.2's ablation and §4.7's negative results, six distinct
-attempts to close the Track A gap to RF/MaxEnt (evaluation-metric fix, scale-up,
-LR-schedule, causal weighting, curriculum learning, and this validation-honest
-re-test) all land in the same 0.93–0.94 band except scale-up, which is consistently
-worse. That convergence is itself informative: it is much more consistent with a
-representation ceiling (§4.6's elevation-dominance finding) than with an
-under-optimized model that further tuning would unlock.
-
-### 4.9 Computational Cost
-
-| Model | Params/trees | Train time | Inference | ROC-AUC |
-|---|---:|---|---|---:|
-| Random Forest (tuned: max_depth=25, min_samples_leaf=3) | 200 trees | 216.0 s | 1.9 s | 0.9704 |
-| MaxEnt (tuned: beta_multiplier=4.0) | linear+hinge+product | 1,232.2 s | 34.0 s | 0.9598 |
-| CDR-PINN, full physics, standard protocol | 1,054,613 | ~132 s (65 ep to best checkpoint, early-stopped at 65/80) | — | 0.9398 |
-| CDR-PINN, no physics (identical architecture, pre-standard-protocol figures) | 1,054,613 | 140.4 s (80 ep) | — | 0.9463 |
-
-The physics constraint's own computational cost is directly measurable, not
-estimated: **~2.5× training time** in the original fixed-80-epoch comparison
-(354.6s vs. 140.4s, identical architecture, data, and epoch budget) — the cost of
-computing the spectral PDE residual and boundary loss every training step. The
-standard-protocol run's own wall time is now driven primarily by early stopping
-(65 epochs before restoring the best-validation-AUC checkpoint) rather than a fixed
-budget, so it is not directly comparable to the earlier physics-vs-no-physics timing
-pair above without re-running the no-physics side under the same protocol (not yet
-done). Peak GPU memory across all CDR-PINN configurations tested (width=32 through
-width=64) stayed under 5.6 GB of the 32 GB available, leaving substantial headroom
-for a larger production run.
+---
 
 ## 5. Discussion
 
-### 5.1 The Ablation Ordering Is Physically Interpretable, Not Just Numerically Convenient
+### 5.1 Why the governing equation did not help
 
-The advection term accounts for the overwhelming majority of the physics-informed
-model's discriminative power (+0.322 of the total +0.339 AUC gain from diffusion-only
-to full CDR). This is independently corroborated twice over, not merely
-post-hoc-rationalized: by this project's own Step 5a measurement that real fire
-locations sit at +115% mean slope versus the national average, and by Biswas et al.
-(2025)'s own MaxEnt result ranking slope as their second-most-important predictor
-(16.7% contribution, their Table 3). A model architecture that structurally routes
-terrain information through a dedicated, physically-directed (upslope) transport term
-— rather than presenting slope as one undifferentiated feature among 15 — recovering
-this same signal as the dominant driver of its own accuracy gain is evidence the
-physics formulation is capturing a real mechanism, not fitting noise.
+Four observations together explain the negative result.
 
-### 5.2 A Transparent Failure Mode, and Why Reporting It Strengthens the Paper
+1. **The target is static, but the equation is dynamic.** Susceptibility, as mapped here and in
+   the reference study, is a long-run property of a location. The data loss rewards a stable
+   ranking of cells, so the easiest optimum is a near-static field. The trained fields are
+   exactly that: median |∂u/∂t| ≤ 0.002 per month. The PDE residual cannot then be small: for a
+   static u, the right-hand side must itself vanish, and nothing in the data enforces that. The
+   residual is absorbed rather than satisfied.
+2. **The terms map onto covariates, not onto processes observed at this scale.** Monthly MODIS
+   detections at 12 km record where ignitions and detectable fires occur. They do not record how
+   fire spreads between cells within a month. Diffusion and advection describe spread, and a
+   susceptibility label contains little information about spread. The diffusion term's ≤ 0.3%
+   share of the right-hand side reflects this.
+3. **Advection works as an elevation channel.** Adding advection recovers most of what diffusion
+   costs. The term magnitudes show that advection carries 83–98% of the right-hand side in every
+   configuration. The model uses v = c·∇E to route terrain information, and in the full predictor
+   set terrain is redundant (§4.7).
+4. **Spatial transfer is limited by the operator, not the inputs.** On identical cells and
+   covariates, even logistic regression transfers far better across blocks and regions than the
+   operator does (Table 4). The global Fourier representation, trained on one national domain,
+   may couple distant regions and fit domain-specific structure that does not transfer. The
+   network without physics shows the same weakness. The physics terms neither cause it nor cure
+   it.
 
-The diffusion-only model's first training attempt collapsed to a trivial,
-uninformative solution (Section 4.2; full account in the Methodology document) because
-the true monthly fire-positive rate (2.3%) gave too weak a data-loss gradient to
-compete with the physics loss's pull toward a constant-field solution that trivially
-satisfies a homogeneous diffusion equation. This is a known category of PINN
-optimization pathology (Wang, Teng & Perdikaris, 2021) — reported here not as a
-limitation to be hidden, but as a concrete, diagnosed, and fixed instance of it,
-strengthening rather than weakening the paper's methodological credibility.
+### 5.2 Implications for physics-informed hazard mapping
 
-### 5.3 Comparison to Biswas et al. (2025) and the Wider Literature
+This study was designed to find a physics benefit if one exists. It includes the conditions
+under which such benefits are usually expected to appear: spatial, regional and temporal shift,
+sparse positives and multiple seeds. The benefit did not appear. Physics-informed models are not
+ruled out for fire. Spread prediction, where the equation describes the observed process, is a
+different problem.
 
-Full comparison table: `CDR_PINN_Novelty_Comparison_Advantages.md` §3. In brief: this
-project already replicates Biswas et al.'s own MaxEnt method directly (not citing
-their number) on this project's full data and beats it (0.9576 vs. their 0.879, see
-`Biswas et al. Verification`); the CDR-PINN reported here is a categorically different
-contribution — not a better classifier on the same static-feature paradigm, but a
-different modeling paradigm entirely, evaluated on the same held-out-accuracy terms
-for direct comparability while additionally offering the mechanistic,
-ablation-testable structure neither Biswas et al. nor any of the regional India/global
-studies reviewed in §1.2–1.3 provide.
+The negative result does, however, set a reporting standard for susceptibility applications:
+- **the same network without physics:** without this arm, the accuracy of a PINO cannot be
+  attributed to its physics;
+- **classical models on identical cells and covariates:** a different grid, population or
+  predictor set makes comparisons meaningless (our own earlier, unmatched comparison was one such
+  case);
+- **covariate-free persistence baselines for temporal claims:** fire recurrence alone is a strong
+  predictor;
+- **a physical-consistency check of the trained field:** a physics-regularised model can score
+  well while violating its equation.
 
-### 5.4 Generalization Is Where the Honest Story Gets Complicated
+### 5.3 Methodological lessons from the pipeline
 
-The hypothesis motivating this whole architectural pivot (§1.4, and Step 8's own
-prior finding that neural architectures already generalize better than Random Forest
-under spatial CV) was that physics-informed structure should show its clearest
-advantage under distribution shift. The evidence collected here is **mixed, not
-confirmatory**: temporal generalization (Track B3, leave-years-out, AUC=0.8960) is
-genuinely strong — a real, positive result for exactly the axis this project's
-per-month operator framing was built to enable. Spatial generalization is not:
-Track B1 (spatial block CV, 0.7510) and especially Track B2 (leave-one-region-out,
-0.6187, weakest of six regions 0.5387, still above chance) show the model does not
-yet transfer well to geographically unseen terrain at this training scale. A direct
-physics-vs-no-physics comparison under identical sparse supervision (§4.3) found
-**no accuracy advantage from the physics constraint** on the random-split evaluation
-— the same comparison run on the harder B1/B2/B3 splits, where the literature
-predicts the effect should actually appear, has now been performed (2026-08-22,
-`FULL_EXPERIMENT_LOG.md` §A2c) and closes the question unfavorably: a noise-level
-non-effect on B1 (Δ=+0.0041) and a real cost on B2 (Δ=−0.0390) and B3 (Δ=−0.0123).
-This was previously the
-single most important remaining experiment for this paper's central claim.
+Several defects that were corrected here are generic and easy to miss:
+- **Half-pixel misregistration.** Rounding against a raster edge instead of taking the floor
+  moved three quarters of the fire points into a neighbouring pixel. Correcting it raises AUC,
+  because the label becomes spatially consistent with the predictors.
+- **Degenerate predictors.** A time-mean anomaly over its own baseline is degenerate. Such
+  predictors add dimensions but no information.
+- **Invalid trend tests.** Mann–Kendall on seasonal or smoothed series produces significance
+  counts that are wrong by an order of magnitude or more. Here Seasonal Kendall found 6.7× (day
+  LST) to 117× (night LST) more significant pixels. For air temperature it reversed the
+  conclusion.
+- **Population mismatch.** Reporting all-pixel AUC for a forest-only label inflates accuracy,
+  because non-forest pixels are trivially negative. Forest-pixel AUC is the informative number.
 
-**What we do and do not claim as a result.** We do not claim the CDR-PINN currently
-generalizes better than RF/MaxEnt spatially — the evidence available says it does
-not, at this architecture size and epoch budget. We do claim: (1) the physics
-structure is capturing a real, independently-corroborated mechanism (§5.1); (2) the
-model achieves temporal generalization no classical baseline in this study or the
-reviewed literature was evaluated on; (3) the mechanistic, ablation-testable
-structure is itself a contribution independent of whether it currently wins on raw
-accuracy. Plausible causes for the weak spatial results — smaller architecture
-(1.05M parameters) than would typically be tuned for this problem, a reduced
-50-epoch budget for the multi-fold B1/B2 tracks (vs. 80 for A/B3, disclosed in
-Methodology §8), single-seed results with no bootstrap confidence interval yet, and
-KMeans-region boundaries that may isolate climatically distinct zones with too
-little in-region training signal — are stated as hypotheses to test, not
-explanations to excuse the result.
+None of these corrections changed any model's AUC by more than 0.012. The substantive
+conclusions above therefore do not depend on them. However, the intermediate statistics that
+underpinned earlier descriptive claims were invalid.
 
-### 5.5 What Three Models and Four Tracks Actually Demonstrate, Together
+### 5.4 Limitations
 
-The pixel-level (Track A), spatial-block/region-level (Tracks B1/B2), and
-year-level (Track B3) analyses are not three independent results to report in
-sequence — read together, they answer a question none of them answers alone:
-*which axis of generalization can each modeling paradigm even be meaningfully
-evaluated on, and does model ranking hold across all of them?* It does not, but not
-in CDR-PINN's favor on the spatial axis specifically — an update from earlier drafts
-of this section, made honestly rather than left stale. RF and MaxEnt lead on
-in-distribution accuracy (Track A, §4.1) **and now also lead clearly on spatial
-generalization** (§4.3's new RF/MaxEnt spatial-block CV: 0.9498/0.9465, both far
-above CDR-PINN's own 0.7510) — the earlier apples-to-oranges gap (CDR-PINN had a
-spatial-CV number, RF/MaxEnt didn't) is now closed, and closing it did not favor the
-physics-informed model. RF and MaxEnt remain structurally ineligible for Track B3
-(temporal generalization) at all (§3, no year-resolved feature table exists for them
-to be evaluated on); CDR-PINN trails on both Track A and the spatial axis but is the
-only model of the three capable of being tested on temporal generalization, where it
-performs well (0.8960) — **this is now CDR-PINN's one clear, unambiguous
-generalization advantage, not one of several open questions.** **No prior study
-reviewed in §1.2–1.3 reports more than one evaluation axis** — this three-model,
-four-track comparison is itself the paper's methodological contribution, independent
-of any single number: a demonstration that single-split AUC reporting, the field's
-current norm, can hide exactly this kind of structural capability gap between
-modeling paradigms — and that closing an apples-to-oranges gap honestly can
-strengthen rather than weaken a paper's central argument, by making it precise about
-*which* axis actually supports the physics-informed model.
+1. **Model family.** One operator family (FNO) and one equation (CDR) were tested. The results do
+   not rule out other architectures, local operators, or equations fitted to spread data.
+2. **Hyperparameters.** The operator's loss weights, spectral modes and window length were not
+   tuned beyond the validated weight decay and early stopping. A full nested search was not run,
+   and a larger search could narrow, but is unlikely to reverse, a 0.26–0.39 AUC gap under spatial
+   hold-out.
+3. **Transductive covariates.** The FNO's global receptive field means the network sees the
+   covariates (never the labels) of test cells, and the dryness index is standardised over all
+   months. Both are disclosed. Both would, if anything, favour the operator.
+4. **Grid mismatch.** The operator runs at 12 km and the classical models at 1 km. All operator
+   comparisons are therefore made on the operator's own 12 km cells (Table 4), never across grids.
+5. **Label definition.** The label is pooled detection of fire, not burned area or severity. The
+   burned-area series (MCD64A1) correlates with annual forest-fire counts (r = 0.93, forest-masked),
+   but it was not used as a label.
+6. **Calibration and uncertainty.** The RF map is a relative score, not a calibrated probability.
+   No calibrated uncertainty estimate was established.
+7. **Untested theoretical properties.** Resolution independence, zero-shot super-resolution and
+   instance-wise fine-tuning of the operator were not evaluated. They are not claimed.
+8. **Explainability.** SHAP values were not computed. Permutation importance and partial
+   dependence were used instead.
 
-### 5.6 Feature Engineering's Measured Impact
+---
 
-Real evidence, not a claim: Random Forest's Gini importance ranking (§3.3's 55
-features, tuned model) shows *engineered, derived* quantities systematically
-outranking raw variable snapshots — `forest_frac_baseline` is the single top-ranked
-feature (0.2066, now that `forest_frac_recent`/`current` have been removed as a
-leakage fix, §3.3), `ndvi_trend_2x12ma` (0.0886, the trend-decomposition feature)
-and `ndvi_below_threshold` (0.0749, the fire-data-driven breakpoint feature) both
-outrank the raw `ndvi_mean` (0.0858) they build on or compete directly with, and a
-single land-cover class fraction (`landcover_frac_LC22_60_tree_broadleaved_
-deciduous`, 0.0571) and terrain slope (0.0456) round out the top features. This
-validates the feature-engineering investment across Steps 2–6 (climatology/anomaly/
-trend/significance decomposition, not just raw monthly means) as measurably, not
-just methodologically, justified — a pipeline that stopped at raw variable snapshots
-(the reference paper's own approach) would have missed the features this study's
-own model relies on most.
+## 6. Conclusions
 
-### 5.7 Limitations
+We asked whether embedding a convection–diffusion–reaction equation in a neural operator improves
+forest-fire susceptibility mapping over India. The design controlled for architecture, inputs,
+grid and evaluation split. The answers are:
+- **RQ1 (physics vs no physics):** the physics terms did not improve discrimination on any of four
+  evaluation tracks, and reduced it where the difference was resolvable.
+- **RQ2 (classical models on identical inputs):** they outperformed the operator on every track,
+  by 0.04 on random splits and by 0.26–0.39 under spatial and regional hold-out.
+- **RQ3 (unseen years):** the operator scored below covariate-free persistence baselines.
+- **RQ4 (physical consistency):** the trained field was effectively static and did not satisfy its
+  own equation.
 
-1. **The Track-A accuracy gap to RF/MaxEnt is not yet closed**, and six tested
-   interventions have been ruled out directly rather than left unexamined:
-   evaluation-metric mismatch (§5.2), under-parameterization (`width=64` scored
-   *worse*, 0.9292 on Track A and again 0.9339 on the independent validation-split
-   re-test, §4.8), causal time-weighting (0.9369, §4.7), staged curriculum learning
-   (0.9343, §4.7), and the learning-rate schedule — this last one not cleanly ruled
-   out but shown to be **split-sensitive** (worse on Track A, 0.9154 vs. 0.9406;
-   better on the independent validation split, 0.9403 vs. 0.9370, §4.8), so it is
-   downgraded from "ruled out" to "unresolved without multi-seed testing." All six
-   interventions except scale-up land within a ~0.93–0.94 AUC band, more consistent
-   with a representation ceiling (§4.6) than an optimization deficit.
-2. **No held-out validation set was used for the original architecture decisions**
-   (§3.4) — the `width=64` and LR-schedule comparisons initially used Track A's test
-   AUC directly, which a validation set exists specifically to avoid. This has since
-   been partially corrected: §4.8 reports a genuine train/val/test re-test of that
-   specific decision. The correction remains partial — every *other* architectural
-   choice in this study (layer count, mode count, window length, LSE-pooling τ,
-   `pos_weight` derivation) still uses PINO-paper defaults chosen once, not
-   validated against held-out data, and a full nested cross-validation across all of
-   them remains future work (§7.2).
-3. **Spatial generalization is weak at this training scale** (Tracks B1/B2, §4.3) —
-   the physics-informed advantage this architecture was motivated to test has now
-   been directly tested under spatial (and temporal) distribution shift, not just
-   Track A (§5.4, `FULL_EXPERIMENT_LOG.md` §A2c), and found **absent**: a
-   noise-level non-effect on B1 and a real cost on B2 and B3.
-4. **Data-hunger under sparse labels.** The ~2.3% monthly fire-positive rate
-   produced a real, observed optimization failure (the trivial-solution collapse,
-   §5.2) before the class-imbalance fix — evidence, not hypothesis, that this
-   architecture's data appetite is a genuine operational concern for this problem.
-5. **Spectral truncation vs. sharp local risk features.** FNO represents fields via
-   a small number of global Fourier modes (16×16), well-suited to smooth, large-
-   scale patterns but structurally less able to represent sharp local
-   discontinuities than a local-receptive-field architecture — not directly tested
-   here, a citable architectural tradeoff.
-6. **Rectangular-grid approximation of India's true boundary geometry** — the
-   Neumann whole-sample-symmetric extension (§3, advection document) fixes the FFT
-   differentiation's boundary artifact but does not exactly represent India's
-   irregular coastline/land border the way a mesh-based method could.
-7. **Physics-loss computational overhead is real and measured**: ~2.5× training
-   time (§4.9) — a genuine deployment-cost consideration for any operational,
-   frequently-retrained use.
-8. **Optimization sensitivity, empirically demonstrated — see item 1 for the full,
-   corrected account.** Scale-up, causal time-weighting, and curriculum learning
-   all made results worse; the learning-rate schedule alone gave opposite outcomes
-   on two different splits and is downgraded to split-sensitive rather than
-   ruled out (item 1). The overall pattern — five of six interventions landing in a
-   narrow AUC band regardless of split, one (scale-up) robustly worse — is a
-   disclosed sign that this architecture/problem combination has a
-   not-yet-well-understood optimization landscape, though it now reads more like a
-   representation ceiling than pure optimization difficulty (§4.6).
-9. **Resolution-independence is proven, not yet empirically exercised** — a
-   theoretical property of the FNO backbone (Li et al., 2023), not yet tested via
-   zero-shot super-resolution on a trained checkpoint.
-10. **Over-reliance on a single input channel — now confirmed by retraining, not
-    just perturbation.** The permutation-importance test (§4.4), the response-curve
-    analysis (§4.5), and the Jackknife retraining test (§4.6) — three independent
-    methods, the last a genuinely different kind of evidence since it retrains
-    rather than perturbs a fixed model — all show near-total sensitivity to
-    elevation alone: removing elevation drops AUC by 0.1370 while removing any other
-    single covariate changes nothing measurable, and a model trained on elevation
-    *alone* reaches AUC=0.9399, within 0.0002 of the full 7-covariate model
-    (0.9397). Three independent confirmations make this a
-    robust *observation*; its *interpretation* remains open (plausibly shortcut
-    learning at this training scale), flagged for multi-seed testing (§7.2) rather
-    than resolved by any single test.
-11. **Biswas et al.'s Jackknife test (their Fig. 10) has now been reproduced**
-    (§4.6) — 14 retrains (leave-one-covariate-out and leave-only-one-covariate-in
-    across the 7 covariates) at a reduced 40-epoch budget, plus a matched-budget
-    "all variables" baseline for fair comparison. This study now reproduces all 3 of
-    Biswas et al.'s variable-understanding analyses, resolving what was previously
-    an explicit 2-of-3 gap. The Jackknife's own result sharpens rather than resolves
-    item 10 above: it is retraining-based confirmation of the same shortcut-learning
-    concern, not new counter-evidence against it.
-12. **No calibrated uncertainty quantification.** The model outputs a point estimate
-    (`σ(u)`), not a calibrated probability with confidence bounds — relevant for any
-    model intended to inform real resource-allocation decisions.
-13. **Transductive information exposure via the FNO's global receptive field** —
-    stated explicitly rather than left implicit: held-out test pixels are excluded
-    from the *data* loss during training, but the FNO's spectral layers mix
-    information globally across the full grid, so the network's hidden
-    representations do see test-pixel *covariates* (never labels) during every
-    forward pass. This is standard for spatial/transductive learning settings but
-    should not go unstated in a Methods section, particularly given FNO's global
-    (not local) receptive field makes it more pronounced than a local-CNN baseline
-    would exhibit.
-14. **Responsible-use scope.** This is a research-stage model — single-seed,
-    incomplete spatial-generalization validation, no calibrated uncertainty — and
-    is not yet suitable for direct operational deployment in land-use, insurance,
-    or resource-allocation decisions without further validation.
+The best susceptibility model in this study is a Random Forest on a corrected 55-predictor
+pipeline (forest-pixel AUC 0.897; 0.838 under 2° spatial hold-out). Its advantage comes from the
+model family and the predictor set.
 
-## 6. Policy Implications and Sustainable Development Goals
+The two positive contributions are the controlled-evaluation design and the physical-consistency
+diagnostic. We recommend both as minimum reporting practice for physics-informed hazard models.
+The corrected national pipeline, the Biswas-style reimplementation (0.893 ± 0.009 vs the reported
+0.879) and the full set of predictions, checkpoints and scripts are released for reuse.
 
-Biswas et al. (2025) explicitly connect their results to nine SDGs (1, 2, 3, 5, 6, 9,
-12, 13, 15) and India's governance apparatus for forest-fire management (the
-National Forest Fire Prevention and Management Scheme, established 2003, plus
-state-level strategies in Uttarakhand, Himachal Pradesh, and Maharashtra). This
-study's mechanistic decomposition offers a genuinely differentiated extension of
-that framing, not a restatement of it: where an undifferentiated MaxEnt probability
-map can only say *where* risk is high, the CDR equation's term structure can, in
-principle, say *why*, and each mechanism maps onto a distinct policy lever.
+---
 
-- **Diffusion (vegetation/moisture)** → fuel and vegetation management, controlled
-  burns, forest composition policy (SDG 15 — Life on Land).
-- **Advection (terrain)** → terrain-aware firebreak placement and early-warning
-  resource pre-positioning specifically along steep upslope corridors, the single
-  largest driver of this study's own predictive accuracy (§4.2) — SDG 13 (Climate
-  Action) and disaster-preparedness policy.
-- **Reaction (human ignition, road proximity)** → patrol allocation and
-  ignition-source control near roads, directly relevant to the forest-dependent
-  communities Biswas et al. emphasize under SDG 1 (No Poverty) and SDG 2 (Zero
-  Hunger), and to SDG 9 (resilient infrastructure).
+## Data and code availability
 
-This differentiated framing is offered as a genuine, low-cost extension of the
-reference study's own policy contribution, made possible specifically by the
-governing-equation structure — not available to an undifferentiated probability
-surface regardless of its underlying accuracy.
+- **Step repositories.** The pipeline (Steps 1–8) is organised as independent repositories:
+  - fire points;
+  - NDVI;
+  - LST;
+  - FLDAS and land cover;
+  - terrain;
+  - accessibility;
+  - integration and classical models;
+  - CDR-PINO.
 
-## 7. Conclusion and Future Work
+  Each repository's notebook or build script produces the v2 outputs reported here.
+- **Integration and CDR-PINO code.** `Integrated_Analysis/step7_models.py` refits every classical
+  experiment. `Physics_Informed_FireRisk_Model/cdr_pinn/run_unified_protocol.py` retrains all 102
+  CDR-PINO runs, and `analyze_unified.py` rebuilds Tables 3–5 from the saved predictions.
+- **Audit.** The complete audit is in `results/`: recalculations, the v2 feature table, run
+  registry, figures, and the reproducibility report with the run order.
+- **Raw data.** The raw data are public (NASA LP DAAC / FIRMS, GES DISC, ESA-CCI/C3S, USGS SRTM,
+  Geofabrik OSM). Download instructions are given in each repository's README.
 
-### 7.1 What This Study Demonstrates, in Plain Terms
+## Figures (generated from result files; `results/final/figures/`)
 
-This study reformulates forest-fire susceptibility mapping — conventionally a
-correlational, static classification problem — as a physically-structured
-dynamical-systems problem, and asks whether that reformulation captures real signal
-rather than assuming it does. The evidence says, honestly: partially, and in a
-specific, identifiable way. The physics structure recovers a real, independently
-corroborated mechanism (terrain-driven spread dominates, confirmed three separate
-ways — §4.2, §4.4, and Step 5a's own field measurement) and enables a genuinely new
-evaluation capability (temporal generalization, §4.3) no prior study in this
-literature, including the reference paper, can attempt. It does not yet match
-classical machine learning on raw in-distribution accuracy, and does not yet
-demonstrate the spatial-generalization advantage that motivated its design. Both
-outcomes are reported without softening, because a Q1 submission's credibility rests
-on that honesty being visible in the methodology, not asserted in the abstract.
+- **Fig. A** (`FigA_contribution_1km.png`): paired ΔAUC decomposition (Table 6).
+- **Fig. B** (`FigB_cdr_ablation_seeds.png`): physics ablation, seed-level AUC per track (Table 3).
+- **Fig. C** (`FigC_same_cells_cdr_vs_classical.png`): CDR-PINO vs classical models on identical
+  cells (Table 4).
+- **Fig. D** (`FigD_B3_vs_nulls.png`): unseen years, CDR-PINO vs persistence baselines (§4.5).
+- **Fig. E** (`FigE_maxent_sample_size.png`): MaxEnt training-size sensitivity (§4.8).
+- **Fig. F** (`FigF_biswas_importance_comparison.png`): permutation importance, reimplementation vs
+  Biswas et al. (§4.9).
+- **Fig. G** (`FigG_cdr_term_magnitudes.png`): term magnitudes and PDE residual of trained
+  checkpoints (Table 5).
+- **Fig. H** (`FigH_final_map_RF_v2.png`): national susceptibility score, RF v2 (§4.10).
 
-**Why this matters beyond the numbers**: a susceptibility map that can only rank
-locations by risk is less operationally useful than one that can attribute *why* a
-location is high-risk — vegetation, terrain, or human activity — because each
-attribution implies a different, actionable intervention (§6). That mechanistic,
-falsifiable structure, testable via ablation in a way no correlational baseline
-permits, is this study's actual contribution, independent of whether its current,
-first-implementation accuracy exceeds Random Forest's.
-
-### 7.2 Future Work
-
-Prioritized by how directly each addresses an open question raised in this paper,
-not a generic list:
-
-1. **Physics-vs-no-physics comparison on Tracks B1/B2/B3**, not just Track A — the
-   single most important unresolved experiment for this paper's central hypothesis,
-   still open after this pass.
-2. **Full nested cross-validation across every architectural choice**, not just the
-   one scale/schedule decision re-tested honestly in §4.8 — layer count, mode count,
-   window length, LSE-pooling τ, and `pos_weight` derivation still use PINO-paper
-   defaults chosen once, never validated against held-out data (§5.7 item 2, revised
-   scope).
-3. **Instance-wise fine-tuning** (Li et al., 2023 §3.2) and **self-adaptive
-   per-point loss weighting** (McClenny & Braga-Neto, 2020) — qualitatively
-   different techniques from the six scale/schedule/causal/curriculum interventions
-   already tested (§4.7–4.8, §5.7 item 1). **Transfer learning specifically for
-   Track B2's weak regions** — fine-tuning a pretrained base per held-out region
-   rather than training each fold from scratch — is a direct, literature-standard
-   candidate for closing the spatial-generalization gap (§5.4) that this study has
-   not yet attempted.
-4. **Multi-seed robustness testing** with bootstrap confidence intervals, mirroring
-   this project's own Step 8b protocol — every number in this paper is currently
-   single-seed, and is now the single most direct way to resolve the split-sensitive
-   LR-schedule finding (§4.8, §5.7 item 1) and confirm whether the causal-weighting
-   and curriculum-learning negative results (§4.7) hold under a tuned $\varepsilon$/
-   unlock-schedule rather than the single defaults tested.
-5. **Zero-shot super-resolution evaluation** on a trained checkpoint, exercising the
-   proven-but-untested discretization-convergence property.
-6. **Extending the permutation-importance, response-curve, and Jackknife tests**
-   (§4.4–4.6, now all three of Biswas et al.'s variable-understanding analyses
-   reproduced) with multi-seed averaging to determine whether the observed
-   elevation-dominance is a robust finding or a single-run artifact.
-7. **LULC's deeper role in the diffusion coefficient** — flagged as deferred since
-   the original diffusion design document, still open.
-8. **Pre-2000 fire history for a non-zero, empirically-grounded initial condition**
-   — a documented upgrade path since the original design.
-9. **Calibrated uncertainty quantification**, naturally pairable with item 4's
-   multi-seed ensemble.
-10. **Wavelet PINNs** (Tripura & Chakraborty, 2022 [cite-verify]) for sharper local
-    risk features than the FNO's 16×16 global-mode truncation permits (§5.7 item 5);
-    **PIKANs** (physics-informed Kolmogorov-Arnold networks), whose learned per-edge
-    spline activations align naturally with this study's own interpretability goals
-    (§4.4–4.6's response-curve/importance analyses); and **domain-decomposition
-    PINNs** (XPINN-style) aligned with the biogeographic zones already established
-    in Step 2's F9 breakpoint analysis — a second, architecturally distinct route to
-    the same Track B2 spatial-generalization gap item 3 targets via transfer
-    learning. All three require substantial architecture work beyond this study's
-    remaining scope and were deliberately not attempted without that justification
-    (§4.7).
+---
 
 ## References
 
-This section compiles the literature newly verified for this manuscript (§1.2–1.4).
-For the full reference list also covering the classical pipeline (Steps 1–7) and the
-CDR-PINN design/proof citations (Fisher–KPP, Evans, PINO, Rothermel, etc.), see
-`METHODOLOGY.md`'s "Consolidated Reference List" — merge alphabetically with the
-entries below when assembling the final manuscript bibliography.
+Anselin, L. (1995). Local indicators of spatial association—LISA. *Geographical Analysis*, 27(2),
+93–115. `[cite-verify]`
 
-Caglar, T., Jaiswal, J., Azim, S., Gala, Y., Nguyen, M.H., & Altintas, I. (2026).
-Physics-guided spatiotemporal neural models for fuel density prediction.
-*arXiv:2607.06999*. [cite-verify — preprint, journal record not yet confirmed]
+Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: a practical and
+powerful approach to multiple testing. *Journal of the Royal Statistical Society B*, 57(1),
+289–300. `[cite-verify]`
 
-Dabrowski, J.J., Pagendam, D.E., Hilton, J., Sanderson, C., MacKinlay, D., Huston, C.,
-Bolt, A., & Kuhnert, P. (2023). Bayesian Physics Informed Neural Networks for data
-assimilation and spatio-temporal modelling of wildfires. *Spatial Statistics*, 55,
-100746. DOI: 10.1016/j.spasta.2023.100746. [cite-confirmed]
+Biswas, U., Mahato, S., & Joshi, P.K. (2025). Spatial prediction of forest fires in India: a
+machine learning approach for improved risk assessment and early warning systems. *Environmental
+Science and Pollution Research*, 32(8), 4856–4878. DOI: 10.1007/s11356-025-35982-8.
+`[cite-confirmed]`
 
-Gholamnia, K., Tahmasebi Moghaddam, H., Einali, G., Akbari Monfared, B., Lorestani,
-G., Ghorbanzadeh, O., & Einali, J. (2026). Uncertainty-aware machine learning via
-Dempster–Shafer theory for wildfire susceptibility mapping. *Spatial Information
-Research*, 34(4), 35. DOI: 10.1007/s41324-026-00692-x. [cite-confirmed]
+Breiman, L. (2001). Random forests. *Machine Learning*, 45(1), 5–32. `[cite-verify]`
 
-Wang, S., Sankaran, S., & Perdikaris, P. (2022). Respecting causality is all you
-need for training physics-informed neural networks. *Computer Methods in Applied
-Mechanics and Engineering* (submitted/arXiv:2203.07404). [cite-verify — causal
-time-weighting technique tested in §4.7, negative result at the tested default]
+Dabrowski, J.J., Pagendam, D.E., Hilton, J., Sanderson, C., MacKinlay, D., Huston, C., Bolt, A., &
+Kuhnert, P. (2023). Bayesian Physics Informed Neural Networks for data assimilation and
+spatio-temporal modelling of wildfires. *Spatial Statistics*, 55, 100746.
+DOI: 10.1016/j.spasta.2023.100746. `[cite-confirmed]`
 
-Tripura, T., & Chakraborty, S. (2022). Wavelet neural operator: a neural operator
-for parameterized differential equations. *arXiv:2205.02191*. [cite-verify — wavelet
-PINN/operator architecture considered in §4.7 as a candidate fix for the spectral-
-truncation limitation (§5.7 item 5), not implemented in this study]
+DeLong, E.R., DeLong, D.M., & Clarke-Pearson, D.L. (1988). Comparing the areas under two or more
+correlated receiver operating characteristic curves: a nonparametric approach. *Biometrics*,
+44(3), 837–845. `[cite-verify]`
 
-Guria, R., Mishra, M., Mohanta, S., & Paul, S. (2025). Forest fire probability
-zonation using dNBR and machine learning models: a case study at the Similipal
-Biosphere Reserve (SBR), Odisha, India. *Environmental Science and Pollution
-Research*, 32(59), 31375–31396. DOI: 10.1007/s11356-025-35976-6. [cite-confirmed]
+Gholamnia, K., Tahmasebi Moghaddam, H., Einali, G., Akbari Monfared, B., Lorestani, G.,
+Ghorbanzadeh, O., & Einali, J. (2026). Uncertainty-aware machine learning via Dempster–Shafer
+theory for wildfire susceptibility mapping. *Spatial Information Research*, 34(4), 35.
+DOI: 10.1007/s41324-026-00692-x. `[cite-confirmed]`
 
-Gupta, P., Shukla, A.K., & Shukla, D.P. (2025). Machine learning-based forest fire
-susceptibility mapping of Southern Mizoram, a part of Indo-Burma Biodiversity
-Hotspot. *Environmental Science and Pollution Research*, 32(59), 31433–31454.
-DOI: 10.1007/s11356-025-36621-y. [cite-confirmed]
+Giglio, L., Schroeder, W., & Justice, C.O. (2016). The collection 6 MODIS active fire detection
+algorithm and fire products. *Remote Sensing of Environment*, 178, 31–41. `[cite-verify]`
 
-Hang, H.T., Mallick, J., Alqadhi, S., Bindajam, A.A., & Abdo, H.G. (2024). Exploring
-forest fire susceptibility and management strategies in Western Himalaya: Integrating
-ensemble machine learning and explainable AI. *Environmental Technology &
-Innovation*, 35, 103655. DOI: 10.1016/j.eti.2024.103655. [cite-confirmed]
+Guria, R., Mishra, M., Mohanta, S., & Paul, S. (2025). Forest fire probability zonation using dNBR
+and machine learning models: a case study at the Similipal Biosphere Reserve (SBR), Odisha,
+India. *Environmental Science and Pollution Research*, 32(59), 31375–31396.
+DOI: 10.1007/s11356-025-35976-6. `[cite-confirmed]`
 
-İban, M.C., & Aksu, O. (2024). SHAP-Driven Explainable Artificial Intelligence
-Framework for Wildfire Susceptibility Mapping Using MODIS Active Fire Pixels: A Case
-Study in Izmir, Türkiye. *Remote Sensing*, 16(15), 2842. DOI: 10.3390/rs16152842.
-[cite-confirmed]
+Gupta, P., Shukla, A.K., & Shukla, D.P. (2025). Machine learning-based forest fire susceptibility
+mapping of Southern Mizoram, a part of Indo-Burma Biodiversity Hotspot. *Environmental Science and
+Pollution Research*, 32(59), 31433–31454. DOI: 10.1007/s11356-025-36621-y. `[cite-confirmed]`
 
-Jiang, P., Yang, Z., Wang, J., Huang, C., Xue, P., Chakraborty, T.C., Chen, X., &
-Qian, Y. (2023). Efficient Super-Resolution of Near-Surface Climate Modeling Using the
-Fourier Neural Operator. *Journal of Advances in Modeling Earth Systems*, 15(7),
-e2023MS003800. DOI: 10.1029/2023MS003800. [cite-confirmed]
+Hang, H.T., Mallick, J., Alqadhi, S., Bindajam, A.A., & Abdo, H.G. (2024). Exploring forest fire
+susceptibility and management strategies in Western Himalaya: Integrating ensemble machine
+learning and explainable AI. *Environmental Technology & Innovation*, 35, 103655.
+DOI: 10.1016/j.eti.2024.103655. `[cite-confirmed]`
+
+Hirsch, R.M., Slack, J.R., & Smith, R.A. (1982). Techniques of trend analysis for monthly water
+quality data. *Water Resources Research*, 18(1), 107–121. `[cite-verify]`
+
+Horn, B.K.P. (1981). Hill shading and the reflectance map. *Proceedings of the IEEE*, 69(1),
+14–47. DOI: 10.1109/PROC.1981.11918. `[cite-confirmed]`
+
+İban, M.C., & Aksu, O. (2024). SHAP-Driven Explainable Artificial Intelligence Framework for
+Wildfire Susceptibility Mapping Using MODIS Active Fire Pixels: A Case Study in Izmir, Türkiye.
+*Remote Sensing*, 16(15), 2842. DOI: 10.3390/rs16152842. `[cite-confirmed]`
+
+Jiang, P., Yang, Z., Wang, J., Huang, C., Xue, P., Chakraborty, T.C., Chen, X., & Qian, Y.
+(2023). Efficient Super-Resolution of Near-Surface Climate Modeling Using the Fourier Neural
+Operator. *Journal of Advances in Modeling Earth Systems*, 15(7), e2023MS003800.
+DOI: 10.1029/2023MS003800. `[cite-confirmed]`
 
 Kanda Naveen Babu, Gour, R., Kurian Ayushi, Ayyappan, N., & Parthasarathy, N. (2023).
-Environmental drivers and spatial prediction of forest fires in the Western Ghats
-biodiversity hotspot, India: An ensemble machine learning approach. *Forest Ecology
-and Management*, 540, 121057. DOI: 10.1016/j.foreco.2023.121057. [cite-confirmed]
+Environmental drivers and spatial prediction of forest fires in the Western Ghats biodiversity
+hotspot, India: An ensemble machine learning approach. *Forest Ecology and Management*, 540,
+121057. DOI: 10.1016/j.foreco.2023.121057. `[cite-confirmed]`
 
-Kantarcioglu, O., Schindler, K., & Kocaman, S. (2023). Forest Fire Susceptibility
-Assessment with Machine Learning Methods in North-East Türkiye. *ISPRS Archives*,
-XLVIII-M-1-2023, 161–167. DOI: 10.5194/isprs-archives-xlviii-m-1-2023-161-2023.
-[cite-confirmed]
+Kantarcioglu, O., Schindler, K., & Kocaman, S. (2023). Forest Fire Susceptibility Assessment with
+Machine Learning Methods in North-East Türkiye. *ISPRS Archives*, XLVIII-M-1-2023, 161–167.
+DOI: 10.5194/isprs-archives-xlviii-m-1-2023-161-2023. `[cite-confirmed]`
 
-Karniadakis, G.E., Kevrekidis, I.G., Lu, L., Perdikaris, P., Wang, S., & Yang, L.
-(2021). Physics-informed machine learning. *Nature Reviews Physics*, 3(6), 422–440.
-DOI: 10.1038/s42254-021-00314-5. [cite-confirmed]
+Karniadakis, G.E., Kevrekidis, I.G., Lu, L., Perdikaris, P., Wang, S., & Yang, L. (2021).
+Physics-informed machine learning. *Nature Reviews Physics*, 3(6), 422–440.
+DOI: 10.1038/s42254-021-00314-5. `[cite-confirmed]`
 
-Kurth, T., Subramanian, S., Harrington, P., Pathak, J., Mardani, M., Hall, D., Miele,
-A., Kashinath, K., & Anandkumar, A. (2023). FourCastNet: Accelerating Global
-High-Resolution Weather Forecasting Using Adaptive Fourier Neural Operators.
-*Proceedings of the Platform for Advanced Scientific Computing Conference (PASC
-'23)*. DOI: 10.1145/3592979.3593412. [cite-confirmed]
+Kurth, T., Subramanian, S., Harrington, P., Pathak, J., Mardani, M., Hall, D., Miele, A.,
+Kashinath, K., & Anandkumar, A. (2023). FourCastNet: Accelerating Global High-Resolution Weather
+Forecasting Using Adaptive Fourier Neural Operators. *Proceedings of PASC '23*.
+DOI: 10.1145/3592979.3593412. `[cite-confirmed]`
 
-Malik, F.A., Mushtaq, F., Farooq, M., Guite, L.T.S., Kanga, S., Meraj, G., Singh,
-S.K., & Kumar, P. (2025). Assessing forest fire vulnerability with fuzzy-AHP:
-insights from Poonch forest division, Jammu and Kashmir. *Discover Forests*, 1(1), 4.
-DOI: 10.1007/s44415-025-00004-5. [cite-confirmed]
+Li, Z., Zheng, H., Kovachki, N., Jin, D., Chen, H., Liu, B., Azizzadenesheli, K., & Anandkumar,
+A. (2023). Physics-informed neural operator for learning partial differential equations.
+arXiv:2111.03794. `[cite-confirmed]`
 
-Meraj, G., Hashimoto, S., Dasgupta, R., & Mitra, B.K. (2025). Ecological Risk
-Assessment and Management of Forest Fires in Tamil Nadu, India: A MaxEnt Model-Based
-Approach for Strategic Resource Allocation and Fire Mitigation. *Risk Analysis*,
-45(11), 3604–3625. DOI: 10.1111/risa.70098. [cite-confirmed]
+Malik, F.A., Mushtaq, F., Farooq, M., Guite, L.T.S., Kanga, S., Meraj, G., Singh, S.K., & Kumar,
+P. (2025). Assessing forest fire vulnerability with fuzzy-AHP: insights from Poonch forest
+division, Jammu and Kashmir. *Discover Forests*, 1(1), 4. DOI: 10.1007/s44415-025-00004-5.
+`[cite-confirmed]`
 
-Read, J.S., Jia, X., Willard, J., Appling, A.P., Zwart, J.A., Oliver, S.K., Karpatne,
-A., Hansen, G.J.A., Hanson, P.C., Watkins, W., Steinbach, M., & Kumar, V. (2019).
-Process-Guided Deep Learning Predictions of Lake Water Temperature. *Water Resources
-Research*, 55(11), 9173–9190. DOI: 10.1029/2019WR024922. [cite-confirmed]
+Meraj, G., Hashimoto, S., Dasgupta, R., & Mitra, B.K. (2025). Ecological Risk Assessment and
+Management of Forest Fires in Tamil Nadu, India: A MaxEnt Model-Based Approach for Strategic
+Resource Allocation and Fire Mitigation. *Risk Analysis*, 45(11), 3604–3625.
+DOI: 10.1111/risa.70098. `[cite-confirmed]`
 
-Santana Neto, V.P., Nunes, A.J.N., Torres, F.T.P., Gleriani, J.M., & Cosenza, D.N.
-(2025). Assessing Wildfire Susceptibility and Driving Variables in Portugal Using
-Machine Learning Approach. *Journal for Nature Conservation*, 86, 126956.
-DOI: 10.1016/j.jnc.2025.126956. [cite-confirmed]
+Phillips, S.J., Anderson, R.P., & Schapire, R.E. (2006). Maximum entropy modeling of species
+geographic distributions. *Ecological Modelling*, 190(3–4), 231–259. `[cite-verify]`
 
-Sarkar, M.S., Majhi, B.K., Pathak, B., Biswas, T., Mahapatra, S., Kumar, D., Bhatt,
-I.D., Kuniyal, J.C., & Nautiyal, S. (2024). Ensembling machine learning models to
-identify forest fire-susceptible zones in Northeast India. *Ecological Informatics*,
-81, 102598. DOI: 10.1016/j.ecoinf.2024.102598. [cite-confirmed]
+Raissi, M., Perdikaris, P., & Karniadakis, G.E. (2019). Physics-informed neural networks: A deep
+learning framework for solving forward and inverse problems involving nonlinear partial
+differential equations. *Journal of Computational Physics*, 378, 686–707. `[cite-confirmed]`
 
-Sun, A.Y., Jiang, P., Shuai, P., & Chen, X. (2024). Bridging Hydrological Ensemble
-Simulation and Learning Using Deep Neural Operators. *Water Resources Research*,
-60(10), e2024WR037555. DOI: 10.1029/2024WR037555. [cite-confirmed]
+Read, J.S., Jia, X., Willard, J., Appling, A.P., Zwart, J.A., Oliver, S.K., Karpatne, A.,
+Hansen, G.J.A., Hanson, P.C., Watkins, W., Steinbach, M., & Kumar, V. (2019). Process-Guided Deep
+Learning Predictions of Lake Water Temperature. *Water Resources Research*, 55(11), 9173–9190.
+DOI: 10.1029/2019WR024922. `[cite-confirmed]`
 
-Symeonidis, P., Vafeiadis, T., Ioannidis, D., & Tzovaras, D. (2025). Wildfire
-Susceptibility Mapping in Greece Using Ensemble Machine Learning. *Earth*, 6(3), 75.
-DOI: 10.3390/earth6030075. [cite-confirmed]
+Roberts, D.R., Bahn, V., Ciuti, S., Boyce, M.S., Elith, J., Guillera-Arroita, G., et al. (2017).
+Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic
+structure. *Ecography*, 40(8), 913–929. `[cite-verify]`
 
-Uthappa, A.R., Das, B., Raizada, A., Kumar, P., Jha, P., & Prasad, P.V.V. (2025).
-Forest Fire Susceptibility Mapping Using Multi-Criteria Decision Making and Machine
-Learning Models in the Western Ghats of India. *Journal of Environmental
-Management*, 379, 124777. DOI: 10.1016/j.jenvman.2025.124777. [cite-confirmed —
-already in METHODOLOGY.md's reference list; repeated here for §1.2's completeness]
+Sannigrahi, S., et al. (2018). ESA-CCI/C3S forest land-cover class mapping (forest-class
+definition used for the fire filter). `[cite-verify — full record in METHODOLOGY.md]`
 
-Vogiatzoglou, K., Papadimitriou, C., Bontozoglou, V., & Ampountolas, K. (2025).
-Physics-informed neural networks for parameter learning of wildfire spreading.
-*Computer Methods in Applied Mechanics and Engineering*, 434, 117545.
-DOI: 10.1016/j.cma.2024.117545. [cite-confirmed]
+Santana Neto, V.P., Nunes, A.J.N., Torres, F.T.P., Gleriani, J.M., & Cosenza, D.N. (2025).
+Assessing Wildfire Susceptibility and Driving Variables in Portugal Using Machine Learning
+Approach. *Journal for Nature Conservation*, 86, 126956. DOI: 10.1016/j.jnc.2025.126956.
+`[cite-confirmed]`
 
-Zakari, R.Y., Malik, O.A., & Ong, W.-H. (2025). Machine learning-driven wildfire
-susceptibility mapping in New South Wales, Australia using remote sensing and
-explainable artificial intelligence. *Natural Hazards*, 121(13), 15331–15357.
-DOI: 10.1007/s11069-025-07395-w. [cite-confirmed]
+Sarkar, M.S., Majhi, B.K., Pathak, B., Biswas, T., Mahapatra, S., Kumar, D., Bhatt, I.D.,
+Kuniyal, J.C., & Nautiyal, S. (2024). Ensembling machine learning models to identify forest
+fire-susceptible zones in Northeast India. *Ecological Informatics*, 81, 102598.
+DOI: 10.1016/j.ecoinf.2024.102598. `[cite-confirmed]`
 
-Zhang, G., Wang, M., & Liu, K. (2019). Forest Fire Susceptibility Modeling Using a
-Convolutional Neural Network for Yunnan Province of China. *International Journal of
-Disaster Risk Science*, 10(3), 386–403. DOI: 10.1007/s13753-019-00233-1.
-[cite-confirmed]
+Sen, P.K. (1968). Estimates of the regression coefficient based on Kendall's tau. *Journal of the
+American Statistical Association*, 63(324), 1379–1389. `[cite-verify]`
 
-**Not cited above but verified as real during the research pass, scope-flagged**:
-Yarmohammadian, R., Put, F., & Van Coile, R. (2025). Physics-Informed Surrogate
-Modelling in Fire Safety Engineering: A Systematic Review. *Applied Sciences*,
-15(15), 8740. DOI: 10.3390/app15158740. [cite-confirmed, but scope is structural/
-building fire-safety engineering, not wildfire — cite only if the manuscript's
-Introduction is extended to discuss physics-informed fire modeling broadly, not
-wildfire-specifically].
+Sun, A.Y., Jiang, P., Shuai, P., & Chen, X. (2024). Bridging Hydrological Ensemble Simulation and
+Learning Using Deep Neural Operators. *Water Resources Research*, 60(10), e2024WR037555.
+DOI: 10.1029/2024WR037555. `[cite-confirmed]`
+
+Symeonidis, P., Vafeiadis, T., Ioannidis, D., & Tzovaras, D. (2025). Wildfire Susceptibility
+Mapping in Greece Using Ensemble Machine Learning. *Earth*, 6(3), 75. DOI: 10.3390/earth6030075.
+`[cite-confirmed]`
+
+Uthappa, A.R., Das, B., Raizada, A., Kumar, P., Jha, P., & Prasad, P.V.V. (2025). Forest Fire
+Susceptibility Mapping Using Multi-Criteria Decision Making and Machine Learning Models in the
+Western Ghats of India. *Journal of Environmental Management*, 379, 124777.
+DOI: 10.1016/j.jenvman.2025.124777. `[cite-confirmed]`
+
+Vogiatzoglou, K., Papadimitriou, C., Bontozoglou, V., & Ampountolas, K. (2025). Physics-informed
+neural networks for parameter learning of wildfire spreading. *Computer Methods in Applied
+Mechanics and Engineering*, 434, 117545. DOI: 10.1016/j.cma.2024.117545. `[cite-confirmed]`
+
+Wang, S., Teng, Y., & Perdikaris, P. (2021). Understanding and mitigating gradient flow pathologies
+in physics-informed neural networks. *SIAM Journal on Scientific Computing*, 43(5), A3055–A3081.
+`[cite-verify]`
+
+Zakari, R.Y., Malik, O.A., & Ong, W.-H. (2025). Machine learning-driven wildfire susceptibility
+mapping in New South Wales, Australia using remote sensing and explainable artificial
+intelligence. *Natural Hazards*, 121(13), 15331–15357. DOI: 10.1007/s11069-025-07395-w.
+`[cite-confirmed]`
+
+Zhang, G., Wang, M., & Liu, K. (2019). Forest Fire Susceptibility Modeling Using a Convolutional
+Neural Network for Yunnan Province of China. *International Journal of Disaster Risk Science*,
+10(3), 386–403. DOI: 10.1007/s13753-019-00233-1. `[cite-confirmed]`
