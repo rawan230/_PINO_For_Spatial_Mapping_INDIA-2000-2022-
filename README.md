@@ -1,5 +1,18 @@
 # 🔥🧠 Physics-Informed Neural Operator (PINO) for Forest-Fire Spatial Mapping — India (2000–2022)
 
+<!-- AUDIT-UPDATE-2026-09-25 -->
+> ### Audit update (2026-09-25)
+> This repository's step was recalculated independently from the raw data in a full end-to-end audit.
+> **Corrected results, reproduction checks and audit code: [`AUDIT_2026-09-25.md`](AUDIT_2026-09-25.md)** and `audit_2026-09-25/`.
+> Earlier text below is kept for the record (it also remains in the git history). Statements superseded by the audit:
+>
+> - **Term ablation (0.602 / 0.924 / 0.940)**: historical single-seed, fixed-budget runs, with no no-physics arm. Under one validated protocol with 3 seeds: **no physics 0.945, diffusion 0.924, diff + adv 0.939, full 0.939** (Track A). No physics configuration beats no physics on any track.
+> - **Physics vs no physics**: confirmed and extended (3 seeds, paired tests). Full − none: −0.006 (A, p < 0.02 for every seed), CI including 0 (B1, B2), −0.011 (B3).
+> - **CDR-PINO historical numbers** (0.9398, 0.7510 ± 0.0182, 0.6187 ± 0.0680, 0.8960) reproduce bit-exactly. Under the unified protocol (3 seeds), full CDR scores 0.939 / 0.719 / 0.570 / 0.893 (A / B1 / B2 / B3), and Track A and B1–B3 were separate models trained under different protocols.
+> - **Elevation dominance**: specific to CDR-PINO's 7-covariate model. With the full predictor set, removing terrain changes AUC by −0.0001; Biswas also ranks elevation low (2.4%).
+<!-- AUDIT-UPDATE-2026-09-25 -->
+
+
 **This repository's headline contribution is the CDR-PINN**: a convection-diffusion-
 reaction (CDR) partial differential equation over a latent fire-susceptibility
 field, solved by a physics-informed Fourier neural operator (PINO, Li et al. 2023)

@@ -1,5 +1,21 @@
 # Study Clarifications — Q&A for Manuscript Finalization
 
+<!-- AUDIT-UPDATE-2026-09-25 -->
+> ### Audit update (2026-09-25)
+> A full end-to-end audit recalculated every step from raw data and re-ran every model (`results/FULL_METHODOLOGY_AUDIT.md`).
+> Take paper numbers **only** from `results/FINAL_MANUSCRIPT_NUMBERS.md`. The pre-update copy of this file is in
+> `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/CDR_PINN_Study_Clarifications_QA.md`. Statements in this document superseded by the audit:
+>
+> - **Term ablation (0.602 / 0.924 / 0.940)**: historical single-seed, fixed-budget runs, with no no-physics arm. Under one validated protocol with 3 seeds: **no physics 0.945, diffusion 0.924, diff + adv 0.939, full 0.939** (Track A). No physics configuration beats no physics on any track.
+> - **Physics vs no physics**: confirmed and extended (3 seeds, paired tests). Full − none: −0.006 (A, p < 0.02 for every seed), CI including 0 (B1, B2), −0.011 (B3).
+> - **CDR-PINO historical numbers** (0.9398, 0.7510 ± 0.0182, 0.6187 ± 0.0680, 0.8960) reproduce bit-exactly. Under the unified protocol (3 seeds), full CDR scores 0.939 / 0.719 / 0.570 / 0.893 (A / B1 / B2 / B3), and Track A and B1–B3 were separate models trained under different protocols.
+> - **'Fisher–KPP reaction'**: a misnomer. The reaction ρσ(u)(1−σ(u)) acts on the logit u, which is equivalent to ds/dt = ρs²(1−s)² for s = σ(u).
+> - **Zero-shot super-resolution, resolution independence and instance-wise fine-tuning**: not evaluated. Present them as future work only.
+> - **Feature count**: the v1 parquet has **57** features (61 columns). v2 has 55 (a different set).
+> - **22 land-cover fractions** come from the 2020 map, inside the label window. v2 uses the 2001 map; the measured leakage effect is small.
+<!-- AUDIT-UPDATE-2026-09-25 -->
+
+
 > Answers your 13 questions directly, in plain language first then technical detail,
 > each grounded in what's actually been built/measured this project (no invented
 > numbers) — flagged clearly wherever something still needs verification or further

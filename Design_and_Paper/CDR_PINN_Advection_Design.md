@@ -1,4 +1,14 @@
 # CDR-PINN: Advection Term Design
+
+<!-- AUDIT-UPDATE-2026-09-25 -->
+> ### Audit update (2026-09-25)
+> A full end-to-end audit recalculated every step from raw data and re-ran every model (`results/FULL_METHODOLOGY_AUDIT.md`).
+> Take paper numbers **only** from `results/FINAL_MANUSCRIPT_NUMBERS.md`. The pre-update copy of this file is in
+> `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/CDR_PINN_Advection_Design.md`. Statements in this document superseded by the audit:
+>
+> - No specific numbers in this document were superseded. Note the audit-wide conclusions: no physics configuration improves accuracy under controlled comparison; forest pixels are the primary evaluation population.
+<!-- AUDIT-UPDATE-2026-09-25 -->
+
 ## Forest Fire Susceptibility Mapping — India (2000–2022)
 
 > **Provenance**: extends `CDR_PINN_Diffusion_Design_v2.md` (locked diffusion term,

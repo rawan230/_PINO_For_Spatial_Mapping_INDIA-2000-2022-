@@ -1,4 +1,15 @@
 # CDR-PINN: Diffusion Equation Design
+
+<!-- AUDIT-UPDATE-2026-09-25 -->
+> ### Audit update (2026-09-25)
+> A full end-to-end audit recalculated every step from raw data and re-ran every model (`results/FULL_METHODOLOGY_AUDIT.md`).
+> Take paper numbers **only** from `results/FINAL_MANUSCRIPT_NUMBERS.md`. The pre-update copy of this file is in
+> `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/CDR_PINN_Diffusion_Design.md`. Statements in this document superseded by the audit:
+>
+> - **'Fisher–KPP reaction'**: a misnomer. The reaction ρσ(u)(1−σ(u)) acts on the logit u, which is equivalent to ds/dt = ρs²(1−s)² for s = σ(u).
+> - **22 land-cover fractions** come from the 2020 map, inside the label window. v2 uses the 2001 map; the measured leakage effect is small.
+<!-- AUDIT-UPDATE-2026-09-25 -->
+
 ## Forest Fire Susceptibility Mapping — India (2000–2022)
 ## Working Document — Locked Decisions So Far (Diffusion Term Only)
 

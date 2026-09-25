@@ -1,5 +1,22 @@
 # Methods — CDR-PINN: A Physics-Informed Neural Operator for Forest-Fire Susceptibility Mapping in India
 
+<!-- AUDIT-UPDATE-2026-09-25 -->
+> ### Audit update (2026-09-25)
+> A full end-to-end audit recalculated every step from raw data and re-ran every model (`results/FULL_METHODOLOGY_AUDIT.md`).
+> Take paper numbers **only** from `results/FINAL_MANUSCRIPT_NUMBERS.md`. The pre-update copy of this file is in
+> `_Archive_Unwanted_2026-09-25/pre_audit_document_snapshots/CDR_PINN_Methodology_Section.md`. Statements in this document superseded by the audit:
+>
+> - **Term ablation (0.602 / 0.924 / 0.940)**: historical single-seed, fixed-budget runs, with no no-physics arm. Under one validated protocol with 3 seeds: **no physics 0.945, diffusion 0.924, diff + adv 0.939, full 0.939** (Track A). No physics configuration beats no physics on any track.
+> - **Physics vs no physics**: confirmed and extended (3 seeds, paired tests). Full − none: −0.006 (A, p < 0.02 for every seed), CI including 0 (B1, B2), −0.011 (B3).
+> - **CDR-PINO historical numbers** (0.9398, 0.7510 ± 0.0182, 0.6187 ± 0.0680, 0.8960) reproduce bit-exactly. Under the unified protocol (3 seeds), full CDR scores 0.939 / 0.719 / 0.570 / 0.893 (A / B1 / B2 / B3), and Track A and B1–B3 were separate models trained under different protocols.
+> - **Elevation dominance**: specific to CDR-PINO's 7-covariate model. With the full predictor set, removing terrain changes AUC by −0.0001; Biswas also ranks elevation low (2.4%).
+> - **'Size-matched negative sampling'**: not implemented. The data loss is a pos-weighted BCE over all training cells.
+> - **Loss-weight formula**: the code uses w_i ← 0.9 w_i + 0.1 · mean‖∇L‖/‖∇L_i‖ every 5 windows, not the multiplicative form stated.
+> - **Zero-shot super-resolution, resolution independence and instance-wise fine-tuning**: not evaluated. Present them as future work only.
+> - **MaxEnt 150k subsample**: sensitivity from 50k to 500k gives AUC 0.964 → 0.969 (all) and 0.855 → 0.872 (forest); fit time grows as about n^1.6.
+<!-- AUDIT-UPDATE-2026-09-25 -->
+
+
 > **Status note (2026-08-20, updated twice)**: architecture, governing equation,
 > well-posedness, training protocol, term-ablation study, and all four generalization
 > tracks (A/B1/B2/B3) plus a physics-vs-no-physics data-efficiency test are now real,
